@@ -50,7 +50,7 @@ def parse_resistor_list(list_str):
 
 def draw_voltage_divider(r1, r2, vin, vout):
     with schemdraw.Drawing() as d:
-        d.config(unit=1.0)
+        d.config(unit=1.0, fontsize=10, lw=1)
         
         # Vin
         d += elm.Dot().label(f'Vin\n{vin:.2f}V' if vin else 'Vin', loc='left')
@@ -73,7 +73,7 @@ def draw_voltage_divider(r1, r2, vin, vout):
 
 def draw_feedback_schematic(r1, r2, vout, vfb):
     with schemdraw.Drawing() as d:
-        d.config(unit=1.0)
+        d.config(unit=1.0, fontsize=10, lw=1)
         
         # Regulator Box (Abstract representation)
         # We'll just draw the pins coming out
@@ -88,7 +88,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         # FB Node
         d += elm.Dot()
         d.push()
-        d += elm.Line().left().length(1).label('FB Pin', loc='top')
+        d += elm.Line().left().length(1)
         d += elm.Label().label(f'Vfb\n{vfb:.2f}V' if vfb else 'Vfb', loc='left')
         d.pop()
         
@@ -103,6 +103,36 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
 # --- Main App ---
 st.set_page_config(page_title="Yuval Tool Rev 1.12", layout="wide")
 st.title("Yuval Tool Rev 1.12")
+
+# --- Sidebar Help ---
+with st.sidebar:
+    st.header("Help / Info")
+    st.info(
+        """
+        **Voltage Divider Calculator**
+        
+        *Theory*: $V_{out} = V_{in} \\times \\frac{R_2}{R_1 + R_2}$
+        
+        **Modes**:
+        1. **E-Series Mode**: Enter any 3 values to find the 4th using standard resistors.
+        2. **Resistor List Mode**: Find best pair from your list for target Vout.
+        
+        ---
+        
+        **Feedback Resistor (DC/DC & LDO)**
+        
+        *Theory*: $V_{out} = V_{fb} \\times (1 + \\frac{R_1}{R_2})$
+        
+        **Usage**:
+        - Enter Target Vout and Reference Vfb.
+        - Choose one resistor (R1 or R2) to fix and enter its value.
+        - Set Minimum Total Resistance (R1+R2) to limit current.
+        - The tool calculates the other resistor using standard values.
+        
+        ---
+        **Contact**: yuval.peleg@gmail.com
+        """
+    )
 
 tab1, tab2 = st.tabs(["Voltage Divider", "Feedback Resistor (DC/DC & LDO)"])
 
