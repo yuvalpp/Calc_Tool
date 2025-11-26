@@ -199,9 +199,11 @@ with tab1:
                             st.error("Could not find valid combination.")
 
             # Draw Schematic
-            st.pyplot(draw_voltage_divider(final_r1, final_r2, final_vin, final_vout).draw())
+            figure = draw_voltage_divider(final_r1, final_r2, final_vin, final_vout).draw()
+            st.pyplot(figure.fig)
         else:
-             st.pyplot(draw_voltage_divider(None, None, None, None).draw())
+             figure = draw_voltage_divider(None, None, None, None).draw()
+             st.pyplot(figure.fig)
 
 # --- Tab 2: Feedback Resistor ---
 with tab2:
@@ -277,6 +279,8 @@ with tab2:
                         st.error("No valid combination found.")
             
             # Draw Schematic
-            st.pyplot(draw_feedback_schematic(final_r1, final_r2, fb_vout, fb_vfb).draw())
+            figure = draw_feedback_schematic(final_r1, final_r2, fb_vout, fb_vfb).draw()
+            st.pyplot(figure.fig)
         else:
-             st.pyplot(draw_feedback_schematic(None, None, None, None).draw())
+             figure = draw_feedback_schematic(None, None, None, None).draw()
+             st.pyplot(figure.fig)
