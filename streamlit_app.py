@@ -3,6 +3,7 @@ import math
 import schemdraw
 import schemdraw.elements as elm
 import matplotlib.pyplot as plt
+import io # Added for image handling if needed, though st.pyplot with dpi is usually enough
 
 # --- E-Series Data ---
 E24 = [
@@ -48,9 +49,27 @@ def parse_resistor_list(list_str):
     except ValueError:
         return []
 
+def generate_e_series_range(series_name, min_val=10.0, max_val=1000000.0):
+    """Generates a full list of E-series resistors within a range."""
+    series = SERIES_DICT[series_name]
+    result = []
+    
+    # Start from 10^0 (1 ohm) up to 10^6 (1M ohm) or similar
+    # Adjust range based on min/max_val
+    start_exp = math.floor(math.log10(min_val))
+    end_exp = math.ceil(math.log10(max_val))
+    
+    for exponent in range(start_exp, end_exp + 1):
+        for mantissa in series:
+            val = mantissa * (10 ** exponent)
+            if min_val <= val <= max_val:
+                result.append(val)
+                
+    return sorted(list(set(result))) # Remove duplicates if any
+
 def draw_voltage_divider(r1, r2, vin, vout):
     with schemdraw.Drawing() as d:
-        d.config(unit=1.0, fontsize=10, lw=1)
+        d.config(unit=2.0, fontsize=12, lw=2) # Unified style
         
         # Vin
         d += elm.Dot().label(f'Vin\n{vin:.2f}V' if vin else 'Vin', loc='left')
@@ -59,9 +78,9 @@ def draw_voltage_divider(r1, r2, vin, vout):
         d += elm.Resistor().down().label(f'R1\n{r1:.2f}Ω' if r1 else 'R1')
         
         # Vout Tap
-        d += elm.Line().right().length(1)
+        d += elm.Line().right().length(1.5)
         d += elm.Dot().label(f'Vout\n{vout:.2f}V' if vout else 'Vout', loc='right')
-        d += elm.Line().left().length(1) # Go back
+        d += elm.Line().left().length(1.5) # Go back
         
         # R2
         d += elm.Resistor().down().label(f'R2\n{r2:.2f}Ω' if r2 else 'R2')
@@ -73,13 +92,12 @@ def draw_voltage_divider(r1, r2, vin, vout):
 
 def draw_feedback_schematic(r1, r2, vout, vfb):
     with schemdraw.Drawing() as d:
-        d.config(unit=1.0, fontsize=10, lw=1)
+        d.config(unit=2.0, fontsize=12, lw=2) # Increased size and line width for better visibility
         
         # Regulator Box (Abstract representation)
-        # We'll just draw the pins coming out
         
         # Vout Pin
-        d += elm.Line().right().length(1).label('Vout Pin', loc='left')
+        d += elm.Line().right().length(1.5).label('Vout Pin', loc='left')
         d += elm.Dot().label(f'Vout\n{vout:.2f}V' if vout else 'Vout', loc='top')
         
         # R1
@@ -88,7 +106,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         # FB Node
         d += elm.Dot()
         d.push()
-        d += elm.Line().left().length(1)
+        d += elm.Line().left().length(1.5)
         d += elm.Label().label(f'Vfb\n{vfb:.2f}V' if vfb else 'Vfb', loc='left')
         d.pop()
         
@@ -109,7 +127,7 @@ with st.sidebar:
     st.header("Help / Info")
     st.info(
         """
-        **Rev 1.12**
+        **Rev 1.13**
         
         **Voltage Divider Calculator**
         
@@ -127,9 +145,11 @@ with st.sidebar:
         
         **Usage**:
         - Enter Target Vout and Reference Vfb.
-        - Choose one resistor (R1 or R2) to fix and enter its value.
-        - Set Minimum Total Resistance (R1+R2) to limit current.
-        - The tool calculates the other resistor using standard values.
+        - Set **Min/Max Resistor Values** to constrain the search.
+        - **Calculation Method**:
+            - **Fix One Resistor**: You specify R1 or R2, tool finds the other.
+            - **Find Best Pair**: Tool searches for the best pair (closest Vout) within limits.
+        - The tool calculates the best resistor combination.
         
         ---
         **Contact**: uv.peleg@gmail.com
@@ -232,10 +252,10 @@ with tab1:
 
             # Draw Schematic
             figure = draw_voltage_divider(final_r1, final_r2, final_vin, final_vout).draw()
-            st.pyplot(figure.fig)
+            st.pyplot(figure.fig, dpi=150) # Increased DPI
         else:
              figure = draw_voltage_divider(None, None, None, None).draw()
-             st.pyplot(figure.fig)
+             st.pyplot(figure.fig, dpi=150)
 
 # --- Tab 2: Feedback Resistor ---
 with tab2:
@@ -250,14 +270,34 @@ with tab2:
         with st.form("fb_form"):
             fb_vout = st.number_input("Target Vout (V)", min_value=0.0, step=0.1)
             fb_vfb = st.number_input("Reference Vfb (V)", min_value=0.0, step=0.01)
-            fb_min_total = st.number_input("Min Total R (Ω)", min_value=0.0, step=100.0)
+            
+            # Resistor Limits
+            st.markdown("### Constraints")
+            c1, c2 = st.columns(2)
+            with c1:
+                fb_r_min = st.number_input("Min Resistor (Ω)", min_value=0.0, value=10.0, step=10.0)
+            with c2:
+                fb_r_max = st.number_input("Max Resistor (Ω)", min_value=0.0, value=1000000.0, step=1000.0)
+            
+            # Inputs depend on Calculation Method
+            fb_calc_method = "Find Best Pair"
+            fb_known = None
+            fb_res_val = None
+            fb_series = "E24"
+            fb_res_list_str = ""
             
             if fb_mode == "E-Series":
                 fb_series = st.selectbox("Resistor Series", ["E24", "E48", "E96"], key="fb_series")
-                fb_known = st.radio("Known Resistor", ["R1", "R2"], horizontal=True)
-                fb_res_val = st.number_input(f"Value for {fb_known} (Ω)", min_value=0.0, step=100.0)
+                
+                fb_calc_method = st.radio("Calculation Method", ["Fix One Resistor", "Find Best Pair"], horizontal=True)
+                
+                if fb_calc_method == "Fix One Resistor":
+                    fb_known = st.radio("Known Resistor", ["R1", "R2"], horizontal=True)
+                    fb_res_val = st.number_input(f"Value for {fb_known} (Ω)", min_value=0.0, step=100.0)
             else:
                 fb_res_list_str = st.text_area("Resistor List (comma sep)", "100, 220, 330, 470, 1000, 2200, 4700, 10000", key="fb_list")
+                # In List mode, we always "Find Best Pair" from the list
+                fb_calc_method = "Find Best Pair"
                 
             fb_submitted = st.form_submit_button("Calculate")
             
@@ -267,10 +307,15 @@ with tab2:
             
             if fb_vout <= fb_vfb:
                  st.error("Vout must be greater than Vfb.")
+            elif fb_r_min > fb_r_max:
+                st.error("Min Resistor value cannot be greater than Max Resistor value.")
             else:
-                if fb_mode == "E-Series":
+                # --- FIX ONE RESISTOR MODE ---
+                if fb_calc_method == "Fix One Resistor":
                     if fb_res_val <= 0:
                         st.error("Resistor value must be positive.")
+                    elif not (fb_r_min <= fb_res_val <= fb_r_max):
+                        st.error(f"Known resistor value {fb_res_val} Ω is outside limits [{fb_r_min}, {fb_r_max}].")
                     else:
                         if fb_known == "R1":
                             r1 = fb_res_val
@@ -283,36 +328,56 @@ with tab2:
                             nearest_r1 = find_nearest_e_series(calc_r1, fb_series)
                             final_r1, final_r2 = nearest_r1, r2
                             
+                        # Validate calculated resistor against limits
+                        calculated_res = final_r2 if fb_known == "R1" else final_r1
+                        if not (fb_r_min <= calculated_res <= fb_r_max):
+                             st.warning(f"Calculated resistor {calculated_res} Ω is outside limits [{fb_r_min}, {fb_r_max}].")
+
                         actual_vout = fb_vfb * (1 + final_r1 / final_r2)
                         st.success(f"Calculated {'R2' if fb_known == 'R1' else 'R1'}: {calc_r2 if fb_known == 'R1' else calc_r1:.2f} Ω")
                         st.info(f"Nearest Standard: {final_r2 if fb_known == 'R1' else final_r1:.2f} Ω")
                         st.write(f"Actual Vout: {actual_vout:.4f} V")
-                        
-                else: # Resistor List
-                    resistors = parse_resistor_list(fb_res_list_str)
-                    best_r1, best_r2 = None, None
-                    min_diff = float('inf')
-                    
-                    for r1 in resistors:
-                        for r2 in resistors:
-                            if r1 + r2 < fb_min_total: continue
-                            calc_vout = fb_vfb * (1 + r1 / r2)
-                            diff = abs(fb_vout - calc_vout)
-                            if diff < min_diff:
-                                min_diff = diff
-                                best_r1, best_r2 = r1, r2
-                                
-                    if best_r1:
-                        final_r1, final_r2 = best_r1, best_r2
-                        actual_vout = fb_vfb * (1 + final_r1 / final_r2)
-                        st.success(f"Best Match: R1={best_r1}Ω, R2={best_r2}Ω")
-                        st.write(f"Actual Vout: {actual_vout:.4f} V")
+
+                # --- FIND BEST PAIR MODE (Search) ---
+                else:
+                    candidates = []
+                    if fb_mode == "E-Series":
+                        # Generate range based on limits
+                        # Ensure we cover the full range requested by user
+                        candidates = generate_e_series_range(fb_series, fb_r_min, fb_r_max)
                     else:
-                        st.error("No valid combination found.")
-            
+                        raw_list = parse_resistor_list(fb_res_list_str)
+                        candidates = [r for r in raw_list if fb_r_min <= r <= fb_r_max]
+                    
+                    if not candidates:
+                        st.error(f"No resistor candidates available in range [{fb_r_min}, {fb_r_max}].")
+                    else:
+                        best_r1, best_r2 = None, None
+                        min_error = float('inf')
+                        
+                        # Search for best pair (closest Vout)
+                        for r1 in candidates:
+                            for r2 in candidates:
+                                calc_vout = fb_vfb * (1 + r1 / r2)
+                                error = abs(calc_vout - fb_vout)
+                                
+                                if error < min_error:
+                                    min_error = error
+                                    best_r1, best_r2 = r1, r2
+                        
+                        if best_r1:
+                            final_r1, final_r2 = best_r1, best_r2
+                            actual_vout = fb_vfb * (1 + final_r1 / final_r2)
+                            error_pct = (min_error / fb_vout) * 100
+                            
+                            st.success(f"Best Match: R1={best_r1}Ω, R2={best_r2}Ω")
+                            st.write(f"Actual Vout: {actual_vout:.4f} V (Error: {error_pct:.2f}%)")
+                        else:
+                            st.error("No valid combination found.")
+
             # Draw Schematic
             figure = draw_feedback_schematic(final_r1, final_r2, fb_vout, fb_vfb).draw()
-            st.pyplot(figure.fig)
+            st.pyplot(figure.fig, dpi=150) # High DPI
         else:
              figure = draw_feedback_schematic(None, None, None, None).draw()
-             st.pyplot(figure.fig)
+             st.pyplot(figure.fig, dpi=150)
