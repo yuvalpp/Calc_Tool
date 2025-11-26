@@ -50,7 +50,7 @@ def parse_resistor_list(list_str):
 
 def draw_voltage_divider(r1, r2, vin, vout):
     with schemdraw.Drawing() as d:
-        d.config(unit=2.5)
+        d.config(unit=1.0)
         
         # Vin
         d += elm.Dot().label(f'Vin\n{vin:.2f}V' if vin else 'Vin', loc='left')
@@ -73,7 +73,7 @@ def draw_voltage_divider(r1, r2, vin, vout):
 
 def draw_feedback_schematic(r1, r2, vout, vfb):
     with schemdraw.Drawing() as d:
-        d.config(unit=2.5)
+        d.config(unit=1.0)
         
         # Regulator Box (Abstract representation)
         # We'll just draw the pins coming out
@@ -88,7 +88,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         # FB Node
         d += elm.Dot()
         d.push()
-        d += elm.Line().left().length(1).label('FB Pin', loc='left')
+        d += elm.Line().left().length(1).label('FB Pin', loc='top')
         d += elm.Label().label(f'Vfb\n{vfb:.2f}V' if vfb else 'Vfb', loc='left')
         d.pop()
         
