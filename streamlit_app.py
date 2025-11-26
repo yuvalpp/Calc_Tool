@@ -101,14 +101,16 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Main App ---
-st.set_page_config(page_title="Yuval Tool Rev 1.12", layout="wide")
-st.title("Yuval Tool Rev 1.12")
+st.set_page_config(page_title="Yuval HW Tool", layout="wide")
+st.title("Yuval HW Tool")
 
 # --- Sidebar Help ---
 with st.sidebar:
     st.header("Help / Info")
     st.info(
         """
+        **Rev 1.12**
+        
         **Voltage Divider Calculator**
         
         *Theory*: $V_{out} = V_{in} \\times \\frac{R_2}{R_1 + R_2}$
@@ -130,7 +132,7 @@ with st.sidebar:
         - The tool calculates the other resistor using standard values.
         
         ---
-        **Contact**: yuval.peleg@gmail.com
+        **Contact**: uv.peleg@gmail.com
         """
     )
 
