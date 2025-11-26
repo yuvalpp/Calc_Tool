@@ -56,7 +56,7 @@ def draw_voltage_divider(r1, r2, vin, vout):
         d += elm.Dot().label(f'Vin\n{vin:.2f}V' if vin else 'Vin', loc='left')
         
         # R1
-        r1_elem = d += elm.Resistor().down().label(f'R1\n{r1:.2f}Ω' if r1 else 'R1')
+        d += elm.Resistor().down().label(f'R1\n{r1:.2f}Ω' if r1 else 'R1')
         
         # Vout Tap
         d += elm.Line().right().length(1)
