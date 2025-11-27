@@ -5,7 +5,7 @@ import math
 class VoltageDividerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Yuval Tool Rev 1.12")
+        self.root.title("Yuval Tool Rev 1.13")
         self.root.geometry("800x600")  # Widen for schematic
         
         # E-Series Data
@@ -42,7 +42,7 @@ class VoltageDividerApp:
         
         title_frame = ttk.Frame(header_frame)
         title_frame.pack(fill=tk.X)
-        ttk.Label(title_frame, text="Yuval Tool Rev 1.12", font=("Arial", 14, "bold")).pack(side=tk.LEFT)
+        ttk.Label(title_frame, text="Yuval Tool Rev 1.13", font=("Arial", 14, "bold")).pack(side=tk.LEFT)
         ttk.Button(title_frame, text="Help / Info", command=self.show_help).pack(side=tk.RIGHT)
         
         # Notebook (Tabs)
