@@ -3,7 +3,10 @@ import math
 import schemdraw
 import schemdraw.elements as elm
 import matplotlib.pyplot as plt
-import io # Added for image handling if needed, though st.pyplot with dpi is usually enough
+import io
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 
 # --- E-Series Data ---
 E24 = [
@@ -30,6 +33,31 @@ E96 = [
 SERIES_DICT = {"E24": E24, "E48": E48, "E96": E96}
 
 # --- Helper Functions ---
+def format_eng(value):
+    """Formats a number in engineering notation (m, k, M, G)."""
+    if value == 0:
+        return "0"
+    
+    abs_val = abs(value)
+    if abs_val < 1e-9: # Too small, just return as is or 0
+        return f"{value:.4g}"
+        
+    exp = math.floor(math.log10(abs_val))
+    eng_exp = exp - (exp % 3)
+    
+    # Clamp to supported range if needed
+    suffixes = {
+        -12: "p", -9: "n", -6: "u", -3: "m", 
+        0: "", 
+        3: "k", 6: "M", 9: "G", 12: "T"
+    }
+    
+    if eng_exp in suffixes:
+        mantissa = value / (10 ** eng_exp)
+        return f"{mantissa:.4g}{suffixes[eng_exp]}"
+    else:
+        return f"{value:.4e}"
+
 def find_nearest_e_series(value, series_name):
     if value <= 0:
         return value
@@ -54,8 +82,6 @@ def generate_e_series_range(series_name, min_val=10.0, max_val=1000000.0):
     series = SERIES_DICT[series_name]
     result = []
     
-    # Start from 10^0 (1 ohm) up to 10^6 (1M ohm) or similar
-    # Adjust range based on min/max_val
     start_exp = math.floor(math.log10(min_val))
     end_exp = math.ceil(math.log10(max_val))
     
@@ -65,11 +91,11 @@ def generate_e_series_range(series_name, min_val=10.0, max_val=1000000.0):
             if min_val <= val <= max_val:
                 result.append(val)
                 
-    return sorted(list(set(result))) # Remove duplicates if any
+    return sorted(list(set(result)))
 
 def draw_voltage_divider(r1, r2, vin, vout):
     with schemdraw.Drawing() as d:
-        d.config(unit=2.0, fontsize=12, lw=2) # Unified style
+        d.config(unit=2.0, fontsize=12, lw=2)
         
         # Vin
         d += elm.Dot().label(f'Vin\n{vin:.2f}V' if vin else 'Vin', loc='left')
@@ -80,7 +106,7 @@ def draw_voltage_divider(r1, r2, vin, vout):
         # Vout Tap
         d += elm.Line().right().length(1.5)
         d += elm.Dot().label(f'Vout\n{vout:.2f}V' if vout else 'Vout', loc='right')
-        d += elm.Line().left().length(1.5) # Go back
+        d += elm.Line().left().length(1.5)
         
         # R2
         d += elm.Resistor().down().label(f'R2\n{r2:.2f}Ω' if r2 else 'R2')
@@ -92,9 +118,7 @@ def draw_voltage_divider(r1, r2, vin, vout):
 
 def draw_feedback_schematic(r1, r2, vout, vfb):
     with schemdraw.Drawing() as d:
-        d.config(unit=2.0, fontsize=12, lw=2) # Increased size and line width for better visibility
-        
-        # Regulator Box (Abstract representation)
+        d.config(unit=2.0, fontsize=12, lw=2)
         
         # Vout Pin
         d += elm.Line().right().length(1.5).label('Vout Pin', loc='left')
@@ -118,30 +142,46 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         
         return d
 
+# --- Near Field Helper Function ---
+def calculate_near_field(d_aperture, wavelength):
+    """Calculates near field boundary."""
+    # Fraunhofer distance: 2 * D^2 / lambda
+    r_ff = (2 * (d_aperture ** 2)) / wavelength
+    return r_ff
+
 # --- Main App ---
 st.set_page_config(page_title="Yuval HW Tool", layout="wide")
 st.title("Yuval HW Tool")
 
-# --- Sidebar Help ---
-with st.sidebar:
-    st.header("Help / Info")
-    st.info(
-        """
-        **Rev 1.13**
-        
+# --- Sidebar Navigation ---
+st.sidebar.header("Navigation")
+selected_tool = st.sidebar.radio(
+    "Go to",
+    ["Voltage Divider", "Feedback Resistor", "dB Calculator", "RADAR Calculator"]
+)
+
+# --- Dynamic Sidebar Help ---
+st.sidebar.markdown("---")
+st.sidebar.header("Help / Info")
+
+if selected_tool == "Voltage Divider":
+    st.sidebar.info(
+        r"""
         **Voltage Divider Calculator**
         
-        *Theory*: $V_{out} = V_{in} \\times \\frac{R_2}{R_1 + R_2}$
+        *Theory*: $V_{out} = V_{in} \times \frac{R_2}{R_1 + R_2}$
         
         **Modes**:
         1. **E-Series Mode**: Enter any 3 values to find the 4th using standard resistors.
         2. **Resistor List Mode**: Find best pair from your list for target Vout.
-        
-        ---
-        
+        """
+    )
+elif selected_tool == "Feedback Resistor":
+    st.sidebar.info(
+        r"""
         **Feedback Resistor (DC/DC & LDO)**
         
-        *Theory*: $V_{out} = V_{fb} \\times (1 + \\frac{R_1}{R_2})$
+        *Theory*: $V_{out} = V_{fb} \times (1 + \frac{R_1}{R_2})$
         
         **Usage**:
         - Enter Target Vout and Reference Vfb.
@@ -149,17 +189,44 @@ with st.sidebar:
         - **Calculation Method**:
             - **Fix One Resistor**: You specify R1 or R2, tool finds the other.
             - **Find Best Pair**: Tool searches for the best pair (closest Vout) within limits.
-        - The tool calculates the best resistor combination.
+        """
+    )
+elif selected_tool == "dB Calculator":
+    st.sidebar.info(
+        r"""
+        **dB Calculator**
         
-        ---
-        **Contact**: uv.peleg@gmail.com
+        - **Ratio to dB**: Convert Power or Voltage ratios to dB.
+        - **Power Conversion**: dBm $\leftrightarrow$ mW.
+        - **Voltage Conversion**: dB $\leftrightarrow$ V/mV/uV.
+        """
+    )
+elif selected_tool == "RADAR Calculator":
+    st.sidebar.info(
+        r"""
+        **RADAR Calculator**
+        
+        **Near Field Calculator**
+        - Calculate boundary $R_{FF} = 2D^2/\lambda$.
+        
+        **FMCW Range Resolver**
+        - Calculate Range from Beat Frequency.
+        - $R = \frac{c \cdot f_{beat}}{2 \cdot S}$
+        
+        **AWR2243 Chirp Designer**
+        - Design chirp parameters for TI AWR2243.
+        - Calculates Bandwidth, Resolution, Max Range.
         """
     )
 
-tab1, tab2 = st.tabs(["Voltage Divider", "Feedback Resistor (DC/DC & LDO)"])
+st.sidebar.markdown("---")
+st.sidebar.write("**Contact**: uv.peleg@gmail.com")
+st.sidebar.write("**Rev 1.16**")
 
-# --- Tab 1: Voltage Divider ---
-with tab1:
+
+# --- Tool Logic ---
+
+if selected_tool == "Voltage Divider":
     st.header("Voltage Divider Calculator")
     st.write("Enter any 3 values to calculate the missing one.")
     
@@ -183,7 +250,6 @@ with tab1:
             
     with col2:
         if submitted:
-            # Parse inputs
             r1 = float(r1_input) if r1_input else None
             r2 = float(r2_input) if r2_input else None
             vin = float(vin_input) if vin_input else None
@@ -250,15 +316,13 @@ with tab1:
                         else:
                             st.error("Could not find valid combination.")
 
-            # Draw Schematic
             figure = draw_voltage_divider(final_r1, final_r2, final_vin, final_vout).draw()
-            st.pyplot(figure.fig, dpi=150) # Increased DPI
+            st.pyplot(figure.fig, dpi=150)
         else:
              figure = draw_voltage_divider(None, None, None, None).draw()
              st.pyplot(figure.fig, dpi=150)
 
-# --- Tab 2: Feedback Resistor ---
-with tab2:
+elif selected_tool == "Feedback Resistor":
     st.header("Feedback Resistor Calculator (DC/DC & LDO)")
     st.write("Formula: Vout = Vfb * (1 + R1/R2)")
     
@@ -271,7 +335,6 @@ with tab2:
             fb_vout = st.number_input("Target Vout (V)", min_value=0.0, step=0.1)
             fb_vfb = st.number_input("Reference Vfb (V)", min_value=0.0, step=0.01)
             
-            # Resistor Limits
             st.markdown("### Constraints")
             c1, c2 = st.columns(2)
             with c1:
@@ -279,7 +342,6 @@ with tab2:
             with c2:
                 fb_r_max = st.number_input("Max Resistor (Ω)", min_value=0.0, value=1000000.0, step=1000.0)
             
-            # Inputs depend on Calculation Method
             fb_calc_method = "Find Best Pair"
             fb_known = None
             fb_res_val = None
@@ -288,15 +350,12 @@ with tab2:
             
             if fb_mode == "E-Series":
                 fb_series = st.selectbox("Resistor Series", ["E24", "E48", "E96"], key="fb_series")
-                
                 fb_calc_method = st.radio("Calculation Method", ["Fix One Resistor", "Find Best Pair"], horizontal=True)
-                
                 if fb_calc_method == "Fix One Resistor":
                     fb_known = st.radio("Known Resistor", ["R1", "R2"], horizontal=True)
                     fb_res_val = st.number_input(f"Value for {fb_known} (Ω)", min_value=0.0, step=100.0)
             else:
                 fb_res_list_str = st.text_area("Resistor List (comma sep)", "100, 220, 330, 470, 1000, 2200, 4700, 10000", key="fb_list")
-                # In List mode, we always "Find Best Pair" from the list
                 fb_calc_method = "Find Best Pair"
                 
             fb_submitted = st.form_submit_button("Calculate")
@@ -310,7 +369,6 @@ with tab2:
             elif fb_r_min > fb_r_max:
                 st.error("Min Resistor value cannot be greater than Max Resistor value.")
             else:
-                # --- FIX ONE RESISTOR MODE ---
                 if fb_calc_method == "Fix One Resistor":
                     if fb_res_val <= 0:
                         st.error("Resistor value must be positive.")
@@ -328,7 +386,6 @@ with tab2:
                             nearest_r1 = find_nearest_e_series(calc_r1, fb_series)
                             final_r1, final_r2 = nearest_r1, r2
                             
-                        # Validate calculated resistor against limits
                         calculated_res = final_r2 if fb_known == "R1" else final_r1
                         if not (fb_r_min <= calculated_res <= fb_r_max):
                              st.warning(f"Calculated resistor {calculated_res} Ω is outside limits [{fb_r_min}, {fb_r_max}].")
@@ -338,12 +395,9 @@ with tab2:
                         st.info(f"Nearest Standard: {final_r2 if fb_known == 'R1' else final_r1:.2f} Ω")
                         st.write(f"Actual Vout: {actual_vout:.4f} V")
 
-                # --- FIND BEST PAIR MODE (Search) ---
                 else:
                     candidates = []
                     if fb_mode == "E-Series":
-                        # Generate range based on limits
-                        # Ensure we cover the full range requested by user
                         candidates = generate_e_series_range(fb_series, fb_r_min, fb_r_max)
                     else:
                         raw_list = parse_resistor_list(fb_res_list_str)
@@ -355,7 +409,6 @@ with tab2:
                         best_r1, best_r2 = None, None
                         min_error = float('inf')
                         
-                        # Search for best pair (closest Vout)
                         for r1 in candidates:
                             for r2 in candidates:
                                 calc_vout = fb_vfb * (1 + r1 / r2)
@@ -375,9 +428,271 @@ with tab2:
                         else:
                             st.error("No valid combination found.")
 
-            # Draw Schematic
             figure = draw_feedback_schematic(final_r1, final_r2, fb_vout, fb_vfb).draw()
-            st.pyplot(figure.fig, dpi=150) # High DPI
+            st.pyplot(figure.fig, dpi=150)
         else:
              figure = draw_feedback_schematic(None, None, None, None).draw()
              st.pyplot(figure.fig, dpi=150)
+
+elif selected_tool == "dB Calculator":
+    st.header("dB Calculator")
+    st.markdown("Convert Power and Voltage between dB and Linear scales.")
+    
+    # --- Ratio to dB (Moved to Top) ---
+    st.subheader("Ratio to dB Calculator")
+    
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        ratio_mode = st.radio("Ratio Type", ["Power Ratio", "Voltage Ratio"], horizontal=True)
+        
+    with col_r2:
+        val1 = st.number_input("Value 1", value=10.0, format="%.4f")
+        val2 = st.number_input("Value 2 (Reference)", value=1.0, format="%.4f")
+        
+    if val1 > 0 and val2 > 0:
+        ratio = val1 / val2
+        if ratio_mode == "Power Ratio":
+            db_val = 10 * math.log10(ratio)
+            st.latex(r"dB = 10 \cdot \log_{10}\left(\frac{P_1}{P_2}\right)")
+        else:
+            db_val = 20 * math.log10(ratio)
+            st.latex(r"dB = 20 \cdot \log_{10}\left(\frac{V_1}{V_2}\right)")
+            
+        st.success(f"Ratio ({val1:.4f} / {val2:.4f}) = **{db_val:.4f} dB**")
+    else:
+        if val2 == 0:
+            st.error("Reference value (Value 2) cannot be zero.")
+        elif val1 <= 0:
+             st.error("Value 1 must be positive for log calculation.")
+             
+    st.markdown("---")
+    
+    # --- Conversions ---
+    col_db1, col_db2 = st.columns(2)
+    
+    with col_db1:
+        st.subheader("Power Conversion")
+        st.latex(r"P_{dBm} = 10 \cdot \log_{10}(P_{mW})")
+        st.latex(r"P_{mW} = 10^{(P_{dBm}/10)}")
+        
+        p_mode = st.radio("Convert Power:", ["dBm to mW", "mW to dBm"], horizontal=True)
+        if p_mode == "dBm to mW":
+            p_val = st.number_input("Power (dBm)", value=0.0)
+            p_res_mw = 10 ** (p_val / 10)
+            st.success(f"{p_val} dBm = **{format_eng(p_res_mw / 1000.0)}W**")
+        else:
+            p_val_mw = st.number_input("Power (mW)", value=1.0, min_value=1e-12, format="%.4f")
+            if p_val_mw > 0:
+                p_res_dbm = 10 * math.log10(p_val_mw)
+                st.success(f"{format_eng(p_val_mw / 1000.0)}W = **{p_res_dbm:.4f} dBm**")
+            else:
+                st.error("Power must be > 0")
+
+    with col_db2:
+        st.subheader("Voltage Conversion")
+        st.latex(r"V_{dB\mu V} = 20 \cdot \log_{10}(V_{\mu V})")
+        st.latex(r"V_{\mu V} = 10^{(V_{dB\mu V}/20)}")
+        
+        v_mode = st.radio("Convert Voltage:", ["dB to Linear", "Linear to dB"], horizontal=True)
+        
+        v_unit = st.selectbox("Voltage Unit", ["V", "mV", "uV"])
+        
+        if v_mode == "dB to Linear":
+            v_val_db = st.number_input(f"Voltage (dB{v_unit})", value=60.0)
+            v_res_lin = 10 ** (v_val_db / 20)
+            st.success(f"{v_val_db} dB{v_unit} = **{format_eng(v_res_lin)}{v_unit}**")
+        else:
+            v_val_lin = st.number_input(f"Voltage ({v_unit})", value=1.0, min_value=1e-12, format="%.4f")
+            if v_val_lin > 0:
+                v_res_db = 20 * math.log10(v_val_lin)
+                st.success(f"{format_eng(v_val_lin)}{v_unit} = **{v_res_db:.4f} dB{v_unit}**")
+            else:
+                st.error("Voltage must be > 0")
+
+elif selected_tool == "RADAR Calculator":
+    st.header("RADAR Calculator")
+    
+    radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer"], horizontal=True)
+    
+    if radar_tool == "Near Field Calculator":
+        st.subheader("Near Field Calculator")
+        st.markdown("Calculate the Near Field (Fresnel) to Far Field (Fraunhofer) boundary distance.")
+        
+        col_nf1, col_nf2 = st.columns([1, 1])
+        
+        with col_nf1:
+            d_ant = st.number_input("Antenna Size D (m)", value=0.1, min_value=0.001, format="%.4f")
+            
+            input_mode = st.radio("Input Mode", ["Wavelength", "Frequency"], horizontal=True)
+            
+            wavelength = 0.0
+            
+            if input_mode == "Wavelength":
+                c_wl1, c_wl2 = st.columns([2, 1])
+                with c_wl1:
+                    wl_val = st.number_input("Wavelength", value=3.9, min_value=1e-6, format="%.4f")
+                with c_wl2:
+                    wl_unit = st.selectbox("Unit", ["mm", "cm", "m"])
+                
+                if wl_unit == "mm":
+                    wavelength = wl_val / 1000.0
+                elif wl_unit == "cm":
+                    wavelength = wl_val / 100.0
+                else:
+                    wavelength = wl_val
+                    
+            else: # Frequency
+                c_f1, c_f2 = st.columns([2, 1])
+                with c_f1:
+                    freq_val = st.number_input("Frequency", value=77.0, format="%.4f")
+                with c_f2:
+                    freq_unit = st.selectbox("Unit", ["Hz", "kHz", "MHz", "GHz"], index=3)
+                
+                if freq_unit == "Hz":
+                    freq_hz = freq_val
+                elif freq_unit == "kHz":
+                    freq_hz = freq_val * 1e3
+                elif freq_unit == "MHz":
+                    freq_hz = freq_val * 1e6
+                else: # GHz
+                    freq_hz = freq_val * 1e9
+                    
+                if freq_hz > 0:
+                    wavelength = 3e8 / freq_hz
+                    st.info(f"Calculated Wavelength: **{wavelength*1000:.2f} mm**")
+            
+            if d_ant > 0 and wavelength > 0:
+                r_ff = calculate_near_field(d_ant, wavelength)
+                
+                st.latex(r"R_{FF} = \frac{2 D^2}{\lambda}")
+                
+                st.success(f"**Near Field Boundary:** {r_ff:.4f} m")
+                st.info(f"**In Kilometers:** {r_ff/1000:.6f} km")
+                
+        with col_nf2:
+            try:
+                st.image("C:/Users/YuvalPeleg/.gemini/antigravity/brain/56e4ac4b-615e-4e61-9848-a1a1198db59e/near_field_diagram_1764769581332.png", caption="Near Field vs Far Field")
+            except:
+                st.warning("Image not found.")
+                
+    elif radar_tool == "FMCW Range Resolver":
+        st.subheader("FMCW Range Resolver")
+        st.markdown("Calculate Range from Beat Frequency and Chirp Slope.")
+        
+        col_fmcw1, col_fmcw2 = st.columns([1, 1])
+        
+        with col_fmcw1:
+            # Slope Input
+            slope_mode = st.radio("Slope Input Mode", ["Direct Input", "Calculate from BW & Time"], horizontal=True)
+            
+            slope = 0.0 # MHz/us
+            
+            if slope_mode == "Direct Input":
+                slope = st.number_input("Chirp Slope (MHz/us)", value=29.98, min_value=0.001, format="%.4f")
+            else:
+                bw_ghz = st.number_input("Bandwidth (GHz)", value=4.0, min_value=0.001)
+                ramp_us = st.number_input("Ramp Time (us)", value=50.0, min_value=0.1)
+                
+                if ramp_us > 0:
+                    # Slope = BW / T
+                    # BW in MHz = bw_ghz * 1000
+                    # T in us
+                    slope = (bw_ghz * 1000) / ramp_us
+                    st.info(f"Calculated Slope: **{slope:.4f} MHz/us**")
+            
+            # Beat Frequency Input
+            f_beat_mhz = st.number_input("Beat Frequency (MHz)", value=10.0, min_value=0.0, format="%.4f")
+            
+            if slope > 0:
+                # Range = (c * f_beat) / (2 * slope)
+                # c = 300 m/us (approx for MHz/us units cancellation)
+                # f_beat in MHz
+                # slope in MHz/us
+                # R = (300 * f_beat) / (2 * slope)
+                
+                c_speed = 300.0 # m/us
+                range_m = (c_speed * f_beat_mhz) / (2 * slope)
+                
+                st.latex(r"R = \frac{c \cdot f_{beat}}{2 \cdot S}")
+                
+                st.success(f"**Calculated Range:** {range_m:.4f} m")
+                st.info(f"**In Centimeters:** {range_m*100:.2f} cm")
+                
+                # Visualization Data
+                # Generate a small plot around the point
+                f_max = f_beat_mhz * 2 if f_beat_mhz > 0 else 20.0
+                f_vals = [i * (f_max / 100) for i in range(101)]
+                r_vals = [(c_speed * f) / (2 * slope) for f in f_vals]
+                
+                df = pd.DataFrame({"Beat Frequency (MHz)": f_vals, "Range (m)": r_vals})
+                
+                fig = px.line(df, x="Beat Frequency (MHz)", y="Range (m)", title="Range vs Beat Frequency")
+                fig.add_scatter(x=[f_beat_mhz], y=[range_m], mode='markers', marker=dict(size=10, color='red'), name='Current Point')
+                
+                with col_fmcw2:
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.error("Slope must be positive.")
+
+    else: # AWR2243 Chirp Designer
+        st.subheader("AWR2243 Chirp Designer")
+        st.markdown("Design chirp parameters and calculate performance metrics.")
+        
+        # Inputs
+        col_des1, col_des2 = st.columns(2)
+        with col_des1:
+            f_start = st.number_input("Start Frequency (GHz)", value=77.0, format="%.2f")
+            slope = st.number_input("Frequency Slope (MHz/us)", value=29.982, format="%.3f")
+        with col_des2:
+            adc_samples = st.number_input("ADC Samples (N)", value=256, step=1)
+            sample_rate = st.number_input("Sample Rate (Msps)", value=10.0, format="%.1f")
+            
+        if sample_rate > 0 and slope > 0:
+            # Calculations
+            t_ramp = adc_samples / sample_rate # us
+            bw_ghz = (slope * t_ramp) / 1000.0 # GHz
+            
+            # Resolution: c / (2 * B)
+            # c = 3e8 m/s
+            # B in Hz = bw_ghz * 1e9
+            # Res = 3e8 / (2 * bw_ghz * 1e9) = 0.15 / bw_ghz (meters)
+            res_m = 0.15 / bw_ghz if bw_ghz > 0 else 0
+            res_cm = res_m * 100
+            
+            # Max IF
+            max_if = 0.9 * sample_rate / 2.0 # MHz
+            
+            # Max Range
+            # R = (c * f_if) / (2 * S)
+            # c = 300 m/us
+            # f_if in MHz
+            # S in MHz/us
+            max_range = (300.0 * max_if) / (2 * slope)
+            
+            # Metric Cards
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Resolution", f"{res_cm:.2f} cm")
+            m2.metric("Max Range", f"{max_range:.2f} m")
+            m3.metric("Sweep Bandwidth", f"{bw_ghz:.3f} GHz")
+            
+            # Warnings
+            if bw_ghz > 4.0:
+                st.warning(f"Warning: Bandwidth ({bw_ghz:.3f} GHz) exceeds AWR2243 limit of 4 GHz.")
+            if max_if > 15.0:
+                st.warning(f"Warning: Max IF Frequency ({max_if:.2f} MHz) exceeds typical 15 MHz limit.")
+                
+            # Plotly Sawtooth
+            st.markdown("### Chirp Visualization")
+            
+            # Points: (0, f_start), (t_ramp, f_start + bw)
+            df_chirp = pd.DataFrame({
+                "Time (us)": [0, t_ramp],
+                "Frequency (GHz)": [f_start, f_start + bw_ghz]
+            })
+            
+            fig_chirp = px.line(df_chirp, x="Time (us)", y="Frequency (GHz)", title="Chirp Frequency vs Time")
+            fig_chirp.update_layout(showlegend=False)
+            st.plotly_chart(fig_chirp, use_container_width=True)
+            
+        else:
+            st.error("Sample Rate and Slope must be positive.")
