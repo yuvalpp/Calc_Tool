@@ -1,3 +1,5 @@
 streamlit
 schemdraw
 matplotlib
+pandas
+plotly
