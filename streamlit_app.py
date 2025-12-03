@@ -571,7 +571,7 @@ elif selected_tool == "RADAR Calculator":
                 
         with col_nf2:
             try:
-                st.image("C:/Users/YuvalPeleg/.gemini/antigravity/brain/56e4ac4b-615e-4e61-9848-a1a1198db59e/near_field_diagram_1764769581332.png", caption="Near Field vs Far Field")
+                st.image("near_field_diagram.png", caption="Near Field vs Far Field")
             except:
                 st.warning("Image not found.")
                 
