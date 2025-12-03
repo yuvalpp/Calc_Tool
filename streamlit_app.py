@@ -221,7 +221,7 @@ elif selected_tool == "RADAR Calculator":
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
-st.sidebar.write("**Rev 1.16**")
+st.sidebar.write("**Rev 1.17**")
 
 
 # --- Tool Logic ---
@@ -638,24 +638,70 @@ elif selected_tool == "RADAR Calculator":
         st.subheader("AWR2243 Chirp Designer")
         st.markdown("Design chirp parameters and calculate performance metrics.")
         
+        # Design Mode Selector
+        design_mode = st.radio("Design Mode", 
+                               ["Define by Sample Rate", "Define by Slope", "Define by Ramp Time"],
+                               horizontal=True)
+        
         # Inputs
         col_des1, col_des2 = st.columns(2)
         with col_des1:
             f_start = st.number_input("Start Frequency (GHz)", value=77.0, format="%.2f")
-            slope = st.number_input("Frequency Slope (MHz/us)", value=29.982, format="%.3f")
+            f_stop = st.number_input("Top Frequency (GHz)", value=81.0, format="%.2f")
+            
         with col_des2:
             adc_samples = st.number_input("ADC Samples (N)", value=256, step=1)
-            sample_rate = st.number_input("Sample Rate (Msps)", value=10.0, format="%.1f")
             
-        if sample_rate > 0 and slope > 0:
-            # Calculations
-            t_ramp = adc_samples / sample_rate # us
-            bw_ghz = (slope * t_ramp) / 1000.0 # GHz
+            sample_rate = 0.0
+            target_slope = 0.0
+            target_ramp = 0.0
             
+            if design_mode == "Define by Sample Rate":
+                sample_rate = st.number_input("Sample Rate (Msps)", value=10.0, format="%.1f")
+            elif design_mode == "Define by Slope":
+                target_slope = st.number_input("Target Slope (MHz/us)", value=100.0, format="%.3f")
+            else: # Define by Ramp Time
+                target_ramp = st.number_input("Target Ramp Time (us)", value=50.0, format="%.1f")
+
+        # Common Calculation
+        bw_ghz = f_stop - f_start
+        
+        valid_inputs = False
+        t_ramp = 0.0
+        slope = 0.0
+        
+        if f_stop > f_start and adc_samples > 0:
+             if design_mode == "Define by Sample Rate" and sample_rate > 0:
+                 t_ramp = adc_samples / sample_rate
+                 slope = (bw_ghz * 1000) / t_ramp
+                 valid_inputs = True
+             elif design_mode == "Define by Slope" and target_slope > 0:
+                 slope = target_slope
+                 t_ramp = (bw_ghz * 1000) / slope
+                 sample_rate = adc_samples / t_ramp
+                 valid_inputs = True
+             elif design_mode == "Define by Ramp Time" and target_ramp > 0:
+                 t_ramp = target_ramp
+                 slope = (bw_ghz * 1000) / t_ramp
+                 sample_rate = adc_samples / t_ramp
+                 valid_inputs = True
+        
+        if valid_inputs:
+            # Display Formulas
+            st.markdown("### Formulas")
+            st.latex(r"BW = f_{stop} - f_{start}")
+            
+            if design_mode == "Define by Sample Rate":
+                 st.latex(r"T_{ramp} = \frac{N_{ADC}}{F_{s}}")
+                 st.latex(r"S = \frac{BW \cdot 1000}{T_{ramp}}")
+            elif design_mode == "Define by Slope":
+                 st.latex(r"T_{ramp} = \frac{BW \cdot 1000}{S}")
+                 st.latex(r"F_{s} = \frac{N_{ADC}}{T_{ramp}}")
+            else: # Ramp Time
+                 st.latex(r"S = \frac{BW \cdot 1000}{T_{ramp}}")
+                 st.latex(r"F_{s} = \frac{N_{ADC}}{T_{ramp}}")
+
             # Resolution: c / (2 * B)
-            # c = 3e8 m/s
-            # B in Hz = bw_ghz * 1e9
-            # Res = 3e8 / (2 * bw_ghz * 1e9) = 0.15 / bw_ghz (meters)
             res_m = 0.15 / bw_ghz if bw_ghz > 0 else 0
             res_cm = res_m * 100
             
@@ -663,10 +709,6 @@ elif selected_tool == "RADAR Calculator":
             max_if = 0.9 * sample_rate / 2.0 # MHz
             
             # Max Range
-            # R = (c * f_if) / (2 * S)
-            # c = 300 m/us
-            # f_if in MHz
-            # S in MHz/us
             max_range = (300.0 * max_if) / (2 * slope)
             
             # Metric Cards
@@ -674,6 +716,12 @@ elif selected_tool == "RADAR Calculator":
             m1.metric("Resolution", f"{res_cm:.2f} cm")
             m2.metric("Max Range", f"{max_range:.2f} m")
             m3.metric("Sweep Bandwidth", f"{bw_ghz:.3f} GHz")
+            
+            # Additional Info
+            i1, i2, i3 = st.columns(3)
+            i1.info(f"Calculated Slope: **{slope:.3f} MHz/us**")
+            i2.info(f"Calculated Sample Rate: **{sample_rate:.3f} Msps**")
+            i3.info(f"Ramp Time: **{t_ramp:.2f} us**")
             
             # Warnings
             if bw_ghz > 4.0:
@@ -684,10 +732,10 @@ elif selected_tool == "RADAR Calculator":
             # Plotly Sawtooth
             st.markdown("### Chirp Visualization")
             
-            # Points: (0, f_start), (t_ramp, f_start + bw)
+            # Points: (0, f_start), (t_ramp, f_stop)
             df_chirp = pd.DataFrame({
                 "Time (us)": [0, t_ramp],
-                "Frequency (GHz)": [f_start, f_start + bw_ghz]
+                "Frequency (GHz)": [f_start, f_stop]
             })
             
             fig_chirp = px.line(df_chirp, x="Time (us)", y="Frequency (GHz)", title="Chirp Frequency vs Time")
@@ -695,4 +743,7 @@ elif selected_tool == "RADAR Calculator":
             st.plotly_chart(fig_chirp, use_container_width=True)
             
         else:
-            st.error("Sample Rate and Slope must be positive.")
+            if f_stop <= f_start:
+                 st.error("Top Frequency must be greater than Start Frequency.")
+            else:
+                 st.error("Please enter positive values for all inputs.")
