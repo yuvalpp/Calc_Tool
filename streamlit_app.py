@@ -221,7 +221,7 @@ elif selected_tool == "RADAR Calculator":
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
-st.sidebar.write("**Rev 1.18**")
+st.sidebar.write("**Rev 1.19**")
 
 
 # --- Tool Logic ---
@@ -768,16 +768,32 @@ elif selected_tool == "RADAR Calculator":
         # 1 Module = 4 Boards
         # 1 Board = 11 Chips
         # 1 Chip = 4 Antennas
-        rx_elements_per_module = 4 * 11 * 4
+        rx_chips_per_board = 11
+        rx_boards_per_module = 4
+        rx_antennas_per_chip = 4
+        
+        rx_chips_per_module = rx_chips_per_board * rx_boards_per_module
+        rx_elements_per_module = rx_chips_per_module * rx_antennas_per_chip
+        
         total_rx_elements = num_rx_modules * rx_elements_per_module
+        total_rx_chips = num_rx_modules * rx_chips_per_module
+        
         rx_spacing = 0.0025 # 2.5 mm
         
         # TX Architecture
         # 1 Module = 4 Boards
         # 1 Board = 9 Chips
         # 1 Chip = 3 Antennas
-        tx_elements_per_module = 4 * 9 * 3
+        tx_chips_per_board = 9
+        tx_boards_per_module = 4
+        tx_antennas_per_chip = 3
+        
+        tx_chips_per_module = tx_chips_per_board * tx_boards_per_module
+        tx_elements_per_module = tx_chips_per_module * tx_antennas_per_chip
+        
         total_tx_elements = num_tx_modules * tx_elements_per_module
+        total_tx_chips = num_tx_modules * tx_chips_per_module
+        
         tx_spacing = 0.00407 # 4.07 mm
         
         # Aperture Calculations
@@ -799,31 +815,34 @@ elif selected_tool == "RADAR Calculator":
         m3.metric("Total RX Elements", f"{total_rx_elements}")
         m4.metric("Total TX Elements", f"{total_tx_elements}")
         
+        m5, m6 = st.columns(2)
+        m5.metric("Total RX AWR Chips", f"{total_rx_chips}")
+        m6.metric("Total TX AWR Chips", f"{total_tx_chips}")
+        
         st.info(f"Wavelength: {wavelength*1000:.3f} mm | RX Aperture: {d_rx:.3f} m | TX Aperture: {d_tx:.3f} m")
+        
+        # Formulas
+        st.markdown("### Formulas")
+        st.latex(r"N_{RX} = Modules \times 4 \times 11 \times 4")
+        st.latex(r"N_{TX} = Modules \times 4 \times 9 \times 3")
+        st.latex(r"D = (N-1) \times d")
+        st.latex(r"\theta = \frac{\lambda}{D} \cdot \frac{180}{\pi}")
         
         # Visualization
         st.markdown("### Array Geometry")
         
-        # Generate Coordinates
-        # RX along X-axis, centered? Or starting from 0? 
-        # Requirement says "RX Elements: Blue dots along the X-axis (Y=0)"
-        # Let's center them for better visualization
+        # Geometry Generation
+        # TX (Horizontal) on top, centered at (0,0)
+        tx_x = [(i - (total_tx_elements-1)/2) * tx_spacing for i in range(total_tx_elements)]
+        tx_y = [0] * total_tx_elements
         
-        rx_x = [(i - (total_rx_elements-1)/2) * rx_spacing for i in range(total_rx_elements)]
-        rx_y = [0] * total_rx_elements
-        
-        tx_x = [0] * total_tx_elements
-        tx_y = [(i - (total_tx_elements-1)/2) * tx_spacing for i in range(total_tx_elements)]
+        # RX (Vertical) stem, starting below TX
+        # Let's start slightly below 0 to avoid overlap visually, or at 0 if they touch.
+        # Going downwards (negative Y)
+        rx_x = [0] * total_rx_elements
+        rx_y = [-(i * rx_spacing) for i in range(total_rx_elements)]
         
         fig = go.Figure()
-        
-        # RX Scatter
-        fig.add_trace(go.Scattergl(
-            x=rx_x, y=rx_y,
-            mode='markers',
-            marker=dict(color='blue', size=4),
-            name='RX Elements'
-        ))
         
         # TX Scatter
         fig.add_trace(go.Scattergl(
@@ -833,13 +852,62 @@ elif selected_tool == "RADAR Calculator":
             name='TX Elements'
         ))
         
+        # RX Scatter
+        fig.add_trace(go.Scattergl(
+            x=rx_x, y=rx_y,
+            mode='markers',
+            marker=dict(color='blue', size=4),
+            name='RX Elements'
+        ))
+        
+        # Add Module Rectangles
+        # TX Modules (Horizontal)
+        # Total length approx d_tx. Split into num_tx_modules.
+        # Width of one module approx d_tx / num_tx_modules
+        # Height arbitrary (e.g., 150mm = 0.15m)
+        tx_mod_width = (total_tx_elements * tx_spacing) / num_tx_modules
+        tx_mod_height = 0.15
+        
+        for i in range(num_tx_modules):
+            # Center X of this module
+            # Total width is centered at 0.
+            # Start X = -total_width/2
+            start_x = -(total_tx_elements * tx_spacing)/2
+            mod_center_x = start_x + (i + 0.5) * tx_mod_width
+            
+            fig.add_shape(type="rect",
+                x0=mod_center_x - tx_mod_width/2, y0=-tx_mod_height/2,
+                x1=mod_center_x + tx_mod_width/2, y1=tx_mod_height/2,
+                line=dict(color="Red", width=1),
+                fillcolor="rgba(255, 0, 0, 0.1)",
+            )
+            
+        # RX Modules (Vertical)
+        # Total length approx d_rx. Split into num_rx_modules.
+        # Height of one module approx d_rx / num_rx_modules
+        # Width arbitrary (e.g., 150mm = 0.15m)
+        rx_mod_height = (total_rx_elements * rx_spacing) / num_rx_modules
+        rx_mod_width = 0.15
+        
+        for i in range(num_rx_modules):
+            # Center Y of this module
+            # Starts at 0 and goes down.
+            mod_center_y = -(i + 0.5) * rx_mod_height
+            
+            fig.add_shape(type="rect",
+                x0=-rx_mod_width/2, y0=mod_center_y - rx_mod_height/2,
+                x1=rx_mod_width/2, y1=mod_center_y + rx_mod_height/2,
+                line=dict(color="Blue", width=1),
+                fillcolor="rgba(0, 0, 255, 0.1)",
+            )
+        
         fig.update_layout(
             title="Physical Array Layout (T-Shape)",
             xaxis_title="X Position (m)",
             yaxis_title="Y Position (m)",
             yaxis=dict(scaleanchor="x", scaleratio=1), # Equal aspect ratio
             showlegend=True,
-            height=600
+            height=800
         )
         
         st.plotly_chart(fig, use_container_width=True)
