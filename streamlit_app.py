@@ -221,7 +221,7 @@ elif selected_tool == "RADAR Calculator":
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
-st.sidebar.write("**Rev 1.17**")
+st.sidebar.write("**Rev 1.18**")
 
 
 # --- Tool Logic ---
@@ -512,7 +512,7 @@ elif selected_tool == "dB Calculator":
 elif selected_tool == "RADAR Calculator":
     st.header("RADAR Calculator")
     
-    radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer"], horizontal=True)
+    radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer", "Custom T-Shape Array Visualizer"], horizontal=True)
     
     if radar_tool == "Near Field Calculator":
         st.subheader("Near Field Calculator")
@@ -634,7 +634,7 @@ elif selected_tool == "RADAR Calculator":
             else:
                 st.error("Slope must be positive.")
 
-    else: # AWR2243 Chirp Designer
+    elif radar_tool == "AWR2243 Chirp Designer":
         st.subheader("AWR2243 Chirp Designer")
         st.markdown("Design chirp parameters and calculate performance metrics.")
         
@@ -747,3 +747,99 @@ elif selected_tool == "RADAR Calculator":
                  st.error("Top Frequency must be greater than Start Frequency.")
             else:
                  st.error("Please enter positive values for all inputs.")
+
+    elif radar_tool == "Custom T-Shape Array Visualizer":
+        st.subheader("Custom T-Shape Array Visualizer")
+        st.markdown("Visualize T-Shape Radar Array and calculate resolution.")
+        
+        # Inputs
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            freq_ghz = st.number_input("Frequency (GHz)", value=77.0, min_value=1.0, format="%.1f")
+            num_rx_modules = st.number_input("Number of RX Modules", value=1, min_value=1, step=1)
+        with col_t2:
+            num_tx_modules = st.number_input("Number of TX Modules", value=1, min_value=1, step=1)
+            
+        # Constants
+        c = 3e8
+        wavelength = c / (freq_ghz * 1e9)
+        
+        # RX Architecture
+        # 1 Module = 4 Boards
+        # 1 Board = 11 Chips
+        # 1 Chip = 4 Antennas
+        rx_elements_per_module = 4 * 11 * 4
+        total_rx_elements = num_rx_modules * rx_elements_per_module
+        rx_spacing = 0.0025 # 2.5 mm
+        
+        # TX Architecture
+        # 1 Module = 4 Boards
+        # 1 Board = 9 Chips
+        # 1 Chip = 3 Antennas
+        tx_elements_per_module = 4 * 9 * 3
+        total_tx_elements = num_tx_modules * tx_elements_per_module
+        tx_spacing = 0.00407 # 4.07 mm
+        
+        # Aperture Calculations
+        d_rx = (total_rx_elements - 1) * rx_spacing
+        d_tx = (total_tx_elements - 1) * tx_spacing
+        
+        # Resolution Calculations (Rayleigh)
+        # theta = lambda / D (radians)
+        theta_az_rad = wavelength / d_rx if d_rx > 0 else 0
+        theta_el_rad = wavelength / d_tx if d_tx > 0 else 0
+        
+        theta_az_deg = math.degrees(theta_az_rad)
+        theta_el_deg = math.degrees(theta_el_rad)
+        
+        # Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Azimuth Res", f"{theta_az_deg:.2f}°")
+        m2.metric("Elevation Res", f"{theta_el_deg:.2f}°")
+        m3.metric("Total RX Elements", f"{total_rx_elements}")
+        m4.metric("Total TX Elements", f"{total_tx_elements}")
+        
+        st.info(f"Wavelength: {wavelength*1000:.3f} mm | RX Aperture: {d_rx:.3f} m | TX Aperture: {d_tx:.3f} m")
+        
+        # Visualization
+        st.markdown("### Array Geometry")
+        
+        # Generate Coordinates
+        # RX along X-axis, centered? Or starting from 0? 
+        # Requirement says "RX Elements: Blue dots along the X-axis (Y=0)"
+        # Let's center them for better visualization
+        
+        rx_x = [(i - (total_rx_elements-1)/2) * rx_spacing for i in range(total_rx_elements)]
+        rx_y = [0] * total_rx_elements
+        
+        tx_x = [0] * total_tx_elements
+        tx_y = [(i - (total_tx_elements-1)/2) * tx_spacing for i in range(total_tx_elements)]
+        
+        fig = go.Figure()
+        
+        # RX Scatter
+        fig.add_trace(go.Scattergl(
+            x=rx_x, y=rx_y,
+            mode='markers',
+            marker=dict(color='blue', size=4),
+            name='RX Elements'
+        ))
+        
+        # TX Scatter
+        fig.add_trace(go.Scattergl(
+            x=tx_x, y=tx_y,
+            mode='markers',
+            marker=dict(color='red', size=4),
+            name='TX Elements'
+        ))
+        
+        fig.update_layout(
+            title="Physical Array Layout (T-Shape)",
+            xaxis_title="X Position (m)",
+            yaxis_title="Y Position (m)",
+            yaxis=dict(scaleanchor="x", scaleratio=1), # Equal aspect ratio
+            showlegend=True,
+            height=600
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
