@@ -221,7 +221,7 @@ elif selected_tool == "RADAR Calculator":
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
-st.sidebar.write("**Rev 1.20**")
+st.sidebar.write("**Rev 1.21**")
 
 
 # --- Tool Logic ---
@@ -511,6 +511,24 @@ elif selected_tool == "dB Calculator":
 
 elif selected_tool == "RADAR Calculator":
     st.header("RADAR Calculator")
+    
+    # --- Password Protection ---
+    if "radar_authenticated" not in st.session_state:
+        st.session_state.radar_authenticated = False
+
+    if not st.session_state.radar_authenticated:
+        st.warning("This tool is password protected.")
+        pwd = st.text_input("Enter Password", type="password")
+        if st.button("Login"):
+            if pwd == "radar123":
+                st.session_state.radar_authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+        
+        st.markdown("---")
+        st.markdown("Don't have a password? [Request Access](mailto:uv.peleg@gmail.com?subject=Request%20Access%20to%20RADAR%20Calculator)")
+        st.stop() # Stop execution here if not authenticated
     
     radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer", "Custom T-Shape Array Visualizer"], horizontal=True)
     
