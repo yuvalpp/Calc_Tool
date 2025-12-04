@@ -221,7 +221,7 @@ elif selected_tool == "RADAR Calculator":
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
-st.sidebar.write("**Rev 1.19**")
+st.sidebar.write("**Rev 1.20**")
 
 
 # --- Tool Logic ---
@@ -832,25 +832,17 @@ elif selected_tool == "RADAR Calculator":
         st.markdown("### Array Geometry")
         
         # Geometry Generation
-        # TX (Horizontal) on top, centered at (0,0)
-        tx_x = [(i - (total_tx_elements-1)/2) * tx_spacing for i in range(total_tx_elements)]
-        tx_y = [0] * total_tx_elements
+        # RX (Horizontal) on top, centered at (0,0)
+        rx_x = [(i - (total_rx_elements-1)/2) * rx_spacing for i in range(total_rx_elements)]
+        rx_y = [0] * total_rx_elements
         
-        # RX (Vertical) stem, starting below TX
+        # TX (Vertical) stem, starting below RX
         # Let's start slightly below 0 to avoid overlap visually, or at 0 if they touch.
         # Going downwards (negative Y)
-        rx_x = [0] * total_rx_elements
-        rx_y = [-(i * rx_spacing) for i in range(total_rx_elements)]
+        tx_x = [0] * total_tx_elements
+        tx_y = [-(i * tx_spacing) for i in range(total_tx_elements)]
         
         fig = go.Figure()
-        
-        # TX Scatter
-        fig.add_trace(go.Scattergl(
-            x=tx_x, y=tx_y,
-            mode='markers',
-            marker=dict(color='red', size=4),
-            name='TX Elements'
-        ))
         
         # RX Scatter
         fig.add_trace(go.Scattergl(
@@ -860,45 +852,53 @@ elif selected_tool == "RADAR Calculator":
             name='RX Elements'
         ))
         
-        # Add Module Rectangles
-        # TX Modules (Horizontal)
-        # Total length approx d_tx. Split into num_tx_modules.
-        # Width of one module approx d_tx / num_tx_modules
-        # Height arbitrary (e.g., 150mm = 0.15m)
-        tx_mod_width = (total_tx_elements * tx_spacing) / num_tx_modules
-        tx_mod_height = 0.15
+        # TX Scatter
+        fig.add_trace(go.Scattergl(
+            x=tx_x, y=tx_y,
+            mode='markers',
+            marker=dict(color='red', size=4),
+            name='TX Elements'
+        ))
         
-        for i in range(num_tx_modules):
+        # Add Module Rectangles
+        # RX Modules (Horizontal)
+        # Total length approx d_rx. Split into num_rx_modules.
+        # Width of one module approx d_rx / num_rx_modules
+        # Height arbitrary (e.g., 150mm = 0.15m)
+        rx_mod_width = (total_rx_elements * rx_spacing) / num_rx_modules
+        rx_mod_height = 0.15
+        
+        for i in range(num_rx_modules):
             # Center X of this module
             # Total width is centered at 0.
             # Start X = -total_width/2
-            start_x = -(total_tx_elements * tx_spacing)/2
-            mod_center_x = start_x + (i + 0.5) * tx_mod_width
+            start_x = -(total_rx_elements * rx_spacing)/2
+            mod_center_x = start_x + (i + 0.5) * rx_mod_width
             
             fig.add_shape(type="rect",
-                x0=mod_center_x - tx_mod_width/2, y0=-tx_mod_height/2,
-                x1=mod_center_x + tx_mod_width/2, y1=tx_mod_height/2,
-                line=dict(color="Red", width=1),
-                fillcolor="rgba(255, 0, 0, 0.1)",
-            )
-            
-        # RX Modules (Vertical)
-        # Total length approx d_rx. Split into num_rx_modules.
-        # Height of one module approx d_rx / num_rx_modules
-        # Width arbitrary (e.g., 150mm = 0.15m)
-        rx_mod_height = (total_rx_elements * rx_spacing) / num_rx_modules
-        rx_mod_width = 0.15
-        
-        for i in range(num_rx_modules):
-            # Center Y of this module
-            # Starts at 0 and goes down.
-            mod_center_y = -(i + 0.5) * rx_mod_height
-            
-            fig.add_shape(type="rect",
-                x0=-rx_mod_width/2, y0=mod_center_y - rx_mod_height/2,
-                x1=rx_mod_width/2, y1=mod_center_y + rx_mod_height/2,
+                x0=mod_center_x - rx_mod_width/2, y0=-rx_mod_height/2,
+                x1=mod_center_x + rx_mod_width/2, y1=rx_mod_height/2,
                 line=dict(color="Blue", width=1),
                 fillcolor="rgba(0, 0, 255, 0.1)",
+            )
+            
+        # TX Modules (Vertical)
+        # Total length approx d_tx. Split into num_tx_modules.
+        # Height of one module approx d_tx / num_tx_modules
+        # Width arbitrary (e.g., 150mm = 0.15m)
+        tx_mod_height = (total_tx_elements * tx_spacing) / num_tx_modules
+        tx_mod_width = 0.15
+        
+        for i in range(num_tx_modules):
+            # Center Y of this module
+            # Starts at 0 and goes down.
+            mod_center_y = -(i + 0.5) * tx_mod_height
+            
+            fig.add_shape(type="rect",
+                x0=-tx_mod_width/2, y0=mod_center_y - tx_mod_height/2,
+                x1=tx_mod_width/2, y1=mod_center_y + tx_mod_height/2,
+                line=dict(color="Red", width=1),
+                fillcolor="rgba(255, 0, 0, 0.1)",
             )
         
         fig.update_layout(
