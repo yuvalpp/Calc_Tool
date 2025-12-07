@@ -3,3 +3,4 @@ schemdraw
 matplotlib
 pandas
 plotly
+numpy
