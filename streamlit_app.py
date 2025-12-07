@@ -8,6 +8,7 @@ import io
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import urllib.parse
 
 # --- E-Series Data ---
 E24 = [
@@ -738,6 +739,23 @@ elif selected_tool == "RADAR Calculator":
         
         if password != "Gideon#1":
             st.warning("Access Denied. Please enter the correct password.")
+
+            # --- Access Request Form ---
+            with st.expander("Don't have a password? Request Access"):
+                st.write("Please fill out the form below to request access via email.")
+                req_name = st.text_input("Name")
+                req_org = st.text_input("Organization / Reason")
+                
+                if req_name:
+                    subject = "Request Access: T-Shape Visualizer"
+                    body = f"Hi Yuval,\n\nI would like to request access to the T-Shape Visualizer.\n\nName: {req_name}\nOrganization: {req_org}\n\nThank you."
+                    
+                    safe_subject = urllib.parse.quote(subject)
+                    safe_body = urllib.parse.quote(body)
+                    mailto_link = f"mailto:uv.peleg@gmail.com?subject={safe_subject}&body={safe_body}"
+                    
+                    st.markdown(f"[**Click here to send email request**]({mailto_link})", unsafe_allow_html=True)
+
         else:
             st.success("Access Granted.")
             st.info("This tool visualizes the theoretical performance of a T-shape MIMO radar array. It calculates resolution, grating lobes, and beam patterns based on module configuration.")
@@ -748,11 +766,11 @@ elif selected_tool == "RADAR Calculator":
                 with c1:
                     ts_freq = st.number_input("Frequency (GHz)", value=77.0, step=0.1, format="%.2f")
                 with c2:
-                    num_rx_mods = st.number_input("RX Modules", value=2, min_value=1, step=1, help="Horizontal Array")
-                    rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.20, step=0.01, format="%.2f")
+                    num_rx_mods = st.number_input("RX Modules", value=3, min_value=1, step=1, help="Horizontal Array")
+                    rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.50, step=0.01, format="%.2f")
                 with c3:
-                    num_tx_mods = st.number_input("TX Modules", value=2, min_value=1, step=1, help="Vertical Array")
-                    tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.15, step=0.01, format="%.2f")
+                    num_tx_mods = st.number_input("TX Modules", value=3, min_value=1, step=1, help="Vertical Array")
+                    tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f")
                 with c4:
                     sim_mode = st.selectbox("Radio Mode", ["Physical Geometry", "Beam Pattern (Azimuth)", "Beam Pattern (Elevation)"])
                     window_type = st.selectbox("Windowing", ["None (Rectangular)", "Hamming", "Hanning", "Blackman"])
