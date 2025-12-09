@@ -145,7 +145,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 2"
+APP_VERSION = "Rev 2.1"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -157,6 +157,42 @@ def calculate_near_field(d_aperture, wavelength):
 # --- Main App ---
 st.set_page_config(page_title="Yuval HW Tool", layout="wide")
 st.title("Yuval HW Tool")
+
+# --- Custom CSS for Styling ---
+st.markdown(
+    """
+    <style>
+    /* Target the main navigation radio button group by its label "Go to" */
+    div[role="radiogroup"][aria-label="Go to"] {
+        background-color: #f0f2f6; /* Light gray background for the container */
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid #d6d6d8;
+    }
+    
+    div[role="radiogroup"][aria-label="Go to"] label {
+        background-color: #ffffff !important;
+        padding: 8px 16px !important;
+        border-radius: 5px !important;
+        margin-right: 8px !important;
+        border: 1px solid #e0e0e0 !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+    }
+
+    div[role="radiogroup"][aria-label="Go to"] label:hover {
+        background-color: #e6f7ff !important; /* Light blue on hover */
+        border-color: #1890ff !important;
+    }
+    
+    div[role="radiogroup"][aria-label="Go to"] p {
+        font-weight: bold !important;
+        font-size: 16px !important;
+        color: #333333 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- Main Navigation ---
 # st.title("Yuval HW Tool") # Already there
@@ -223,12 +259,22 @@ elif selected_tool == "RADAR Calculator":
         **AWR2243 Chirp Designer**
         - Design chirp parameters for TI AWR2243.
         - Calculates Bandwidth, Resolution, Max Range.
+        
+        **T-Shape Array Visualizer**
+        - Visualize T-Shape virtual arrays.
+        - Fixed aperture vs. Fixed element modes.
+        - (Password Protected)
+        
+        **Monostatic Power Budget**
+        - General Radar Equation SNR.
+        - Editable Link Budget & Loss Tables.
+        - Explicit Formulas ($P_t$, $RCS$, $T_{sys}$).
         """
     )
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
-st.sidebar.write("**Rev 2**")
+st.sidebar.write("**Rev 2.1**")
 
 
 # --- Tool Logic ---
@@ -519,7 +565,7 @@ elif selected_tool == "dB Calculator":
 elif selected_tool == "RADAR Calculator":
     st.header("RADAR Calculator")
     
-    radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer", "T-Shape Array Visualizer"], horizontal=True)
+    radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer", "T-Shape Array Visualizer", "Monostatic Power Budget Calculator"], horizontal=True)
     
     if radar_tool == "Near Field Calculator":
         st.subheader("Near Field Calculator")
@@ -762,31 +808,100 @@ elif selected_tool == "RADAR Calculator":
 
             # A. Inputs (Moved to Main Window)
             with st.expander("Configuration", expanded=True):
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
+                # 1. Top Level Config
+                c_conf1, c_conf2 = st.columns(2)
+                with c_conf1:
                     ts_freq = st.number_input("Frequency (GHz)", value=77.0, step=0.1, format="%.2f")
-                with c2:
-                    num_rx_mods = st.number_input("RX Modules", value=3, min_value=1, step=1, help="Horizontal Array")
-                    rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.50, step=0.01, format="%.2f")
-                with c3:
-                    num_tx_mods = st.number_input("TX Modules", value=3, min_value=1, step=1, help="Vertical Array")
-                    tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f")
-                with c4:
+                with c_conf2:
+                    design_mode = st.radio("Design Mode", ["Hardware (Fixed Elements)", "Theoretical (Fixed Aperture)"], horizontal=True)
+
+                st.markdown("---")
+
+                c1, c2, c3, c4 = st.columns(4)
+                
+                # Initialize variables to ensure scope
+                num_rx_mods = 1
+                num_tx_mods = 1
+                rx_aperture_m = 0.5
+                tx_aperture_m = 0.5
+                
+                if design_mode == "Hardware (Fixed Elements)":
+                     with c1:
+                        num_rx_mods = st.number_input("RX Modules", value=3, min_value=1, step=1, help="Horizontal Array")
+                     with c2:
+                        rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.50, step=0.01, format="%.2f", key="rx_space_hw")
+                     with c3:
+                        num_tx_mods = st.number_input("TX Modules", value=3, min_value=1, step=1, help="Vertical Array")
+                     with c4:
+                        tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f", key="tx_space_hw")
+                     
+                     st.caption(f"**Physical Module Size (Fixed):** RX = 440 mm | TX = 440 mm")
+                else:
+                     with c1:
+                        rx_aperture_m = st.number_input("RX Aperture (m)", value=0.5, min_value=0.01, step=0.01, format="%.3f")
+                     with c2:
+                        rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.50, step=0.01, format="%.2f", key="rx_space_th")
+                     with c3:
+                        tx_aperture_m = st.number_input("TX Aperture (m)", value=0.5, min_value=0.01, step=0.01, format="%.3f")
+                     with c4:
+                        tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f", key="tx_space_th")
+
+                st.markdown("---")
+                c_mode1, c_mode2 = st.columns(2)
+                with c_mode1:
                     sim_mode = st.selectbox("Radio Mode", ["Physical Geometry", "Beam Pattern (Azimuth)", "Beam Pattern (Elevation)"])
+                with c_mode2:
                     window_type = st.selectbox("Windowing", ["None (Rectangular)", "Hamming", "Hanning", "Blackman"])
 
             # B. Architecture Logic
-            # RX Arm
-            rx_ant_per_chip = 4
-            rx_chips_per_board = 11
-            rx_boards_per_mod = 4
-            rx_elements_total = num_rx_mods * rx_boards_per_mod * rx_chips_per_board * rx_ant_per_chip # Num * 176
-            
-            # TX Arm
-            tx_ant_per_chip = 3
-            tx_chips_per_board = 9
-            tx_boards_per_mod = 4
-            tx_elements_total = num_tx_mods * tx_boards_per_mod * tx_chips_per_board * tx_ant_per_chip # Num * 108
+            # B. Architecture Logic
+            if design_mode == "Hardware (Fixed Elements)":
+                # Fixed Module Dimensions (mm)
+                RX_MOD_LEN_MM = 440.0
+                TX_MOD_LEN_MM = 440.0
+
+                # RX Calculations
+                if rx_spacing_mm <= 0: rx_spacing_mm = 0.001
+                elements_per_rx_mod = int(math.floor(RX_MOD_LEN_MM / rx_spacing_mm))
+                rx_elements_total = num_rx_mods * elements_per_rx_mod
+                rx_awr_count = math.ceil(rx_elements_total / 4) # 4 channels per AWR2243
+
+                # TX Calculations
+                if tx_spacing_mm <= 0: tx_spacing_mm = 0.001
+                elements_per_tx_mod = int(math.floor(TX_MOD_LEN_MM / tx_spacing_mm))
+                tx_elements_total = num_tx_mods * elements_per_tx_mod
+                tx_awr_count = math.ceil(tx_elements_total / 3) # 3 channels per AWR2243 (typ) OR 4? User said "based on channels per AWR2243 as already defined". 
+                # Old code had: rx_ant_per_chip = 4, tx_ant_per_chip = 3. So 3 is correct.
+
+                # Display Hardware Summary
+                st.info(f"**Hardware Logic (Fixed {RX_MOD_LEN_MM:.0f}mm Modules):**\n\n"
+                        f"**RX Array:** {num_rx_mods} Mods $\\times$ {elements_per_rx_mod} elems = **{rx_elements_total} Total Elements**\n"
+                        f"Requires **{rx_awr_count}** AWR2243 Devices (4 ch/chip)\n\n"
+                        f"**TX Array:** {num_tx_mods} Mods $\\times$ {elements_per_tx_mod} elems = **{tx_elements_total} Total Elements**\n"
+                        f"Requires **{tx_awr_count}** AWR2243 Devices (3 ch/chip)")
+            else:
+                # Theoretical Mode
+                d_rx = rx_spacing_mm / 1000.0
+                d_tx = tx_spacing_mm / 1000.0
+                
+                if d_rx > 0:
+                    rx_elements_total = int(rx_aperture_m / d_rx) + 1
+                    # Ensure at least 2 elements
+                    if rx_elements_total < 2: rx_elements_total = 2
+                else:
+                    rx_elements_total = 2
+                    
+                if d_tx > 0:
+                    tx_elements_total = int(tx_aperture_m / d_tx) + 1
+                    if tx_elements_total < 2: tx_elements_total = 2
+                else:
+                    tx_elements_total = 2
+                    
+                # Mock module definition for visualization
+                elements_per_rx_mod = rx_elements_total
+                num_rx_mods = 1
+                elements_per_tx_mod = tx_elements_total
+                num_tx_mods = 1
             
             # C. Physics & Math Engine
             d_rx = rx_spacing_mm / 1000.0 # meters
@@ -821,10 +936,30 @@ elif selected_tool == "RADAR Calculator":
                 rx_coords = (np.arange(rx_elements_total) - (rx_elements_total - 1)/2) * d_rx
                 rx_y_pos = 0.0
                 
-                # Module Outline (440mm x 150mm)
+                # Module Outline (Dynamic Sizing)
                 # Assume RX modules are arranged horizontally, side-by-side.
-                # Total width = num_rx_mods * 0.44m
-                mod_w_rx = 0.44
+                # Total width = num_rx_mods * elements_per_rx_mod * d_rx (approx)
+                # Actually, physical module size should probably wrap the elements.
+                # Elements per mod = 176.
+                # Width = 176 * d_rx. Height = ??? (Fixed or scaling?)
+                # User's complaint: "different antenna density of same size".
+                # Means if spacing changes, the dots move but the box stays same size => density visually changes.
+                # We want the box to shrink/grow with the dots.
+                
+                # Dynamic Width based on spacing
+                # 4 chips/board * 4 ants/chip = 16 ants/board? No.
+                # Logic says: 4 rx_ant_per_chip, 11 rx_chips_per_board, 4 rx_boards_per_mod.
+                # Total 176 elements horizontal.
+                
+                # In Design Mode, elements_per_rx_mod is set.
+                # Width = Fixed 440mm per module in Hardware mode
+                if design_mode == "Hardware (Fixed Elements)":
+                    mod_w_rx = 0.440 # 440 mm
+                else:
+                    mod_w_rx = elements_per_rx_mod * d_rx
+                
+                # Height is structural, let's keep it fixed or proportional. 
+                # Let's keep height fixed as spacing usually affects the array axis.
                 mod_h_rx = 0.15
                 
                 # Calculate centers of RX modules
@@ -850,13 +985,19 @@ elif selected_tool == "RADAR Calculator":
                 # TX Modules: likely Vertical. (150mm x 440mm) ?
                 # Or 440mm x 150mm rotated?
                 # Let's assume they form the vertical stem.
-                # Size per module: 440mm x 150mm. User said "size of each modle is 440mmx150mm".
-                # For vertical stem, it makes sense to stack them?
-                # If stacked, their long dimension might be vertical?
-                # Or wide dimension vertical?
-                # Let's try 150(W) x 440(H) for vertical modules to form a thin stem.
-                mod_w_tx = 0.15
-                mod_h_tx = 0.44
+                # Size per module
+                # TX: 3 * 9 * 4 = 108 elements.
+                # elements_per_tx_mod is set in logic block above
+
+                
+                # Vertical array: dim is determined by tx spacing.
+                # Height = 108 * d_tx
+                # Height = Fixed 440mm per module in Hardware mode
+                if design_mode == "Hardware (Fixed Elements)":
+                    mod_h_tx = 0.440 # 440 mm
+                else:
+                    mod_h_tx = elements_per_tx_mod * d_tx
+                mod_w_tx = 0.15 # Fixed width
 
                 # Gap below RX
                 gap = 0.05
@@ -1022,3 +1163,241 @@ elif selected_tool == "RADAR Calculator":
             if gl_issues:
                 for issue in gl_issues:
                     st.warning(issue)
+
+    elif radar_tool == "Monostatic Power Budget Calculator":
+        st.subheader("Monostatic Power Budget Calculator")
+        st.write("General monostatic radar SNR calculation.")
+
+
+        # --- Layout: 2 Columns ---
+        col_main_inputs, col_main_results = st.columns([1, 2])
+        
+        # --- 1. Inputs (Left Column) ---
+        with col_main_inputs:
+            st.markdown("### Inputs")
+            
+            # A. Frequency
+            with st.expander("1. Frequency", expanded=True):
+                f_start = st.number_input("Start Frequency (GHz)", value=76.0, step=0.1, format="%.2f")
+                f_stop = st.number_input("Stop Frequency (GHz)", value=79.0, step=0.1, format="%.2f")
+                
+                f_c = (f_start + f_stop) / 2.0
+                if f_c > 0:
+                    wavelength_m = 3e8 / (f_c * 1e9) 
+                else:
+                    wavelength_m = 0
+                
+                st.write(f"$f_c$: **{f_c:.2f} GHz**")
+                st.write(f"$\\lambda$: **{wavelength_m * 1000:.2f} mm**")
+                st.caption(f"Formula: $\\lambda = c / f_c$")
+                
+            # B. Transmit Chain
+            with st.expander("2. Transmit Chain", expanded=True):
+                # Default 10.4 dBm per spec
+                P_t_dbm = st.number_input("Transmit Power P_t (dBm)", value=10.4, step=0.1) 
+                
+                # Formula Display
+                P_t_dbw = P_t_dbm - 30.0
+                st.latex(r"P_t[dBW] = P_t[dBm] - 30")
+                st.info(f"{P_t_dbm} dBm → **{P_t_dbw:.1f} dBW**")
+                
+                # Updated Default: 5.5
+                G_elm_db = st.number_input("Antenna Element Gain G_elm (dB)", value=5.5, step=0.1)
+                
+                # Processing Gain
+                col_g1, col_g2 = st.columns(2)
+                with col_g1:
+                    N_tx = st.number_input("N_Tx", value=324, step=1)
+                with col_g2:
+                    N_rx = st.number_input("N_Rx", value=528, step=1)
+                    
+                G_proc_lin = N_tx * N_rx
+                G_proc_db = 10 * math.log10(G_proc_lin) if G_proc_lin > 0 else 0
+                
+                st.caption(f"$G_{{proc}}$: **{G_proc_db:.1f} dB**")
+                st.caption("Formula: $10 \\log_{10}(N_{Tx} N_{Rx})$")
+
+            # C. Target
+            with st.expander("3. Target Properties", expanded=True):
+                tgt_mode = st.radio("Target Mode", ["Disc", "Manual RCS"])
+                
+                if tgt_mode == "Disc":
+                    disc_diam_cm = st.number_input("Disc Diameter (cm)", value=2.15, step=0.1) # Default 2.15
+                    apply_imp = st.checkbox("Apply -3dB Imperfection", value=True)
+                    
+                    st.latex(r"A = \pi (D/2)^2")
+                    st.latex(r"\sigma = \frac{4\pi A^2}{\lambda^2}")
+                    if apply_imp:
+                        st.latex(r"\sigma_{dBsm} = 10 \log_{10}(\sigma) - 3")
+                    
+                    area = math.pi * ((disc_diam_cm / 100.0) / 2)**2
+                    if wavelength_m > 0:
+                        sigma_lin = (4 * math.pi * area**2) / (wavelength_m**2)
+                    else:
+                        sigma_lin = 0
+                        
+                    sigma_dbsm_raw = 10 * math.log10(sigma_lin) if sigma_lin > 0 else -100
+                    
+                    if apply_imp:
+                        sigma_lin *= 0.5
+                        sigma_dbsm = sigma_dbsm_raw - 3.0
+                    else:
+                        sigma_dbsm = sigma_dbsm_raw
+                        
+                    st.write(f"RCS $\\sigma_t$: **{sigma_dbsm:.1f} dBsm**")
+                else:
+                    sigma_dbsm = st.number_input("RCS $\\sigma_t$ (dBsm)", value=20.0, step=1.0)
+            
+            # D. Range & Environment
+            with st.expander("4. Range & Environment", expanded=True):
+                # Updated Default: 8.0 m
+                R_m = st.number_input("Range R (m)", value=8.0, step=0.5)
+                
+                # Noise
+                NF_db = st.number_input("Noise Figure NF (dB)", value=15.0, step=0.1) # Default 15.0
+                
+                # Formula helper
+                st.latex(r"T_{sys}[dBK] = 10 \log_{10}(300) + NF")
+                st.latex(r"(1/T_{sys})[dB] = -T_{sys}[dBK]")
+                
+                use_manual_noise = st.checkbox("Manual T_sys")
+                
+                if use_manual_noise:
+                     T_sys_K = st.number_input("System Temp T_sys (K)", value=9486.0) # approx 300*10^1.5
+                else:
+                     # T_sys = 300 * 10^(NF/10) per prompt requirement
+                     T_sys_K = 300.0 * (10**(NF_db/10.0))
+                
+                T_sys_dbk = 10 * math.log10(T_sys_K) if T_sys_K > 0 else 0
+                st.info(f"For NF={NF_db} dB: **$T_{{sys}} = {T_sys_dbk:.1f}$ dBK**, **$1/T_{{sys}} = {-T_sys_dbk:.1f}$ dB**")
+                
+                # Bandwidth
+                # Updated Default: 50.0 kHz
+                W_bb_khz = st.number_input("Receiver Bandwidth W_BB (kHz)", value=50.0, step=10.0)
+                W_bb_hz = W_bb_khz * 1000.0
+                W_bb_dbhz = 10 * math.log10(W_bb_hz) if W_bb_hz > 0 else 0
+                st.write(f"$W_{{BB}}$: **{W_bb_dbhz:.1f} dBHz**")
+                st.caption(f"Formula: $10 \\log_{{10}}(W_{{BB}})$")
+        
+        # --- 2. Results (Right Column) ---
+        with col_main_results:
+            
+            # --- Pre-calculation for Totals ---
+            # Default Data
+            loss_data_default = pd.DataFrame([
+                {"Loss parameter": "Tx antenna pattern", "Loss dB": 1.5, "Description": "Off-boresight"},
+                {"Loss parameter": "Rx antenna pattern", "Loss dB": 1.5, "Description": "Off-boresight"},
+                {"Loss parameter": "Sampling & straddling", "Loss dB": 1.0, "Description": "Processing"},
+                {"Loss parameter": "FFT & weighting", "Loss dB": 5.0, "Description": "Windowing"},
+                {"Loss parameter": "Field degradation", "Loss dB": 3.0, "Description": "Env/HW"},
+                {"Loss parameter": "Coherency degradation", "Loss dB": 0.5, "Description": "Phase noise"}
+            ])
+            
+            # --- Link Budget Calculation ---
+            # Constants
+            k_db = -228.6 # dBW/K/Hz
+            
+            # Calculation Terms (dB)
+            # P_t (dBm - 30)
+            P_t_dbw = P_t_dbm - 30.0
+            
+            G_elm_sq_db = 2 * G_elm_db
+            
+            Lambda_sq_db = 20 * math.log10(wavelength_m) if wavelength_m > 0 else 0
+            
+            Sigma_db = sigma_dbsm
+            
+            # G_proc_db already calculated
+            
+            # Constant Term 1/(4pi)^3
+            Const_term_db = -10 * math.log10((4 * math.pi)**3)
+            
+            # Range Term 1/R^4
+            Range_term_db = -40 * math.log10(R_m) if R_m > 0 else 0
+            
+            # Boltzmann 1/k
+            Boltzmann_term_db = 228.6
+            
+            # Noise Temp 1/T_sys (Negative in dB sum)
+            Temp_term_db = -T_sys_dbk
+            
+            # Bandwidth 1/W_BB (Negative in dB sum)
+            BW_term_db = -W_bb_dbhz
+            
+            # Use placeholder for L_sys until user edits
+            # But we need to define the editor first? 
+            # Solution: We render the EDITOR at the bottom, but we need the value for the TOP table.
+            # Streamlit reruns on change. We can initialize the dataframe outside or just calculate?
+            # Actually st.data_editor returns the edited df immediately.
+            
+            # But we want to display the Equation Table FIRST. 
+            # We can calculate with "current" loss, render Equation Table, then render Loss Table.
+            # However, if we put data_editor AFTER, will it update the BEFORE table on same run?
+            # Yes, because Streamlit reruns the whole script on interaction.
+            # BUT, we need the `edited_loss_df` variable available BEFORE we calculate `SNR_db`.
+            # So we must CALL data_editor before we use its output. 
+            # But we want to DISPLAY it below.
+            # Trick: Use a container? Or just call it but display it later?
+            # You cannot "call it but display later". The call places the element.
+            # So we must use a container for the TOP part (Equation Table) and fill it later?
+            # No, standard practice: Layout order in code determines display order.
+            
+            # If user wants Loss Table BELOW Radar Table:
+            # Code structure:
+            # 1. Calculate everything EXCEPT Loss.
+            # 2. Render Loss Table (so we get the value). -> This places it in UI.
+            # 3. Calculate Final SNR.
+            # 4. Render Radar Table. -> This places it in UI.
+            # Result: Loss Table is ABOVE Radar Table. This is NOT receiving what user wants.
+            
+            # To get Loss Table BELOW:
+            # We need the value of Loss to calculate the table.
+            # But we can only get the value by rendering the editor.
+            # This is a Streamlit dependency cycle if we want visual order != logical order.
+            # However, `st.data_editor` state is preserved across reruns. 
+            # We can persist the loss value in session_state?
+            # Simplest approach: Render Loss Table in an Expander or just at the bottom, 
+            # but we accept that to get the value for the calculation we might need to render it.
+            
+            # Wait, `st.container` allows out-of-order rendering? 
+            # "You can insert elements into a container at any time."
+            
+            container_radar_table = st.container()
+            st.markdown("---") # Separator
+            st.markdown("### Loss Table")
+            
+            edited_loss_df = st.data_editor(loss_data_default, num_rows="dynamic", use_container_width=True)
+            L_sys_db = edited_loss_df["Loss dB"].sum()
+            st.metric("Total Losses (dB)", f"{L_sys_db:.2f} dB")
+            
+            Loss_term_db = -L_sys_db
+            
+            # Now calculate SNR
+            SNR_db = (P_t_dbw + G_elm_sq_db + Lambda_sq_db + Sigma_db + G_proc_db + 
+                      Const_term_db + Range_term_db + Boltzmann_term_db + 
+                      Temp_term_db + BW_term_db + Loss_term_db)
+            
+            # Construct DataFrame for Radar Table
+            lb_data = [
+                ["Transmit Power", "P_t", f"{P_t_dbw:.1f} dBW", "User input (converted)"],
+                ["Antenna Gain Sq.", "G_elm^2", f"{G_elm_sq_db:.1f} dB", "2 * G_elm"],
+                ["Wavelength Term", "lambda^2", f"{Lambda_sq_db:.1f} dB", "20 * log10(lambda)"],
+                ["Target RCS", "sigma_t", f"{Sigma_db:.1f} dBsm", "User input"],
+                ["Processing Gain", "G_proc", f"{G_proc_db:.1f} dB", "10 * log10(N_tx * N_rx)"],
+                ["Constant Term", "1/(4pi)^3", f"{Const_term_db:.1f} dB", "-33 dB"],
+                ["Range Term", "1/R^4", f"{Range_term_db:.1f} dB", "-40 * log10(R)"],
+                ["Boltzmann", "1/K", f"+228.6 dB", "Constant"],
+                ["Noise Temperature", "1/T_sys", f"{Temp_term_db:.1f} dB", "-10 * log10(T_sys)"],
+                ["Bandwidth Term", "1/W_BB", f"{BW_term_db:.1f} dB", "-10 * log10(W_BB)"],
+                ["Loss Term", "1/L_sys", f"{Loss_term_db:.1f} dB", "- Sum(Losses)"],
+                ["Final SNR", "SNR", f"**{SNR_db:.2f} dB**", "Sum of all terms"]
+            ]
+            lb_df = pd.DataFrame(lb_data, columns=["Term", "Symbol", "Value (dB)", "Formula / Comment"])
+            
+            # Render into the container (which is physically above the Loss Table)
+            with container_radar_table:
+                st.markdown("### Radar Equation Table")
+                st.table(lb_df)
+                st.success(f"**Calculated SNR: {SNR_db:.2f} dB**")
+                st.caption("Formula: $SNR_{dB} = 10 \\log_{10}(SNR_{lin})$")
+

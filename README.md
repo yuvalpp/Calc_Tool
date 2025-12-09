@@ -1,4 +1,4 @@
-# Yuval HW Tool (Rev 2)
+# Yuval HW Tool (Rev 2.1)
 
 A collection of hardware calculation tools including Voltage Divider, Feedback Resistor, dB Calculator, and RADAR Calculator.
 
@@ -31,3 +31,4 @@ streamlit run streamlit_app.py
     *   FMCW Range Resolver
     *   AWR2243 Chirp Designer
     *   **T-Shape Array Visualizer** (Protected: `Gideon#1`)
+    *   **Monostatic Power Budget Calculator**
