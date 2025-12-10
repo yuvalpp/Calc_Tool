@@ -145,7 +145,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 2.1"
+APP_VERSION = "Rev 2.2"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -274,7 +274,7 @@ elif selected_tool == "RADAR Calculator":
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
-st.sidebar.write("**Rev 2.1**")
+st.sidebar.write(f"**{APP_VERSION}**")
 
 
 # --- Tool Logic ---
@@ -804,7 +804,13 @@ elif selected_tool == "RADAR Calculator":
 
         else:
             st.success("Access Granted.")
-            st.info("This tool visualizes the theoretical performance of a T-shape MIMO radar array. It calculates resolution, grating lobes, and beam patterns based on module configuration.")
+            st.info("""
+            **T-Shape Array Visualizer**
+            This tool simulates the beam pattern of a T-shape MIMO array source.
+            
+            *   **Blue Line (Real)**: The pattern of your specific array configuration (including Grating Lobes).
+            *   **Gray Dashed Line (Theoretical)**: A reference pattern from a "perfect" high-density array ($N=1000$) with the **same aperture length and windowing**. It shows the ideal pattern without grating lobes.
+            """)
 
             # A. Inputs (Moved to Main Window)
             with st.expander("Configuration", expanded=True):
@@ -847,11 +853,13 @@ elif selected_tool == "RADAR Calculator":
                         tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f", key="tx_space_th")
 
                 st.markdown("---")
-                c_mode1, c_mode2 = st.columns(2)
+                c_mode1, c_mode2, c_mode3 = st.columns(3)
                 with c_mode1:
                     sim_mode = st.selectbox("Radio Mode", ["Physical Geometry", "Beam Pattern (Azimuth)", "Beam Pattern (Elevation)"])
                 with c_mode2:
                     window_type = st.selectbox("Windowing", ["None (Rectangular)", "Hamming", "Hanning", "Blackman"])
+                with c_mode3:
+                    sim_res = st.number_input("Simulation Resolution (deg)", value=0.1, min_value=0.01, max_value=1.0, step=0.01, format="%.2f")
 
             # B. Architecture Logic
             # B. Architecture Logic
@@ -1057,15 +1065,16 @@ elif selected_tool == "RADAR Calculator":
             else: # Beam Pattern
                 st.markdown(f"#### {sim_mode}")
                 
-                c_math, c_plot = st.columns([1, 2])
+                # --- Dual View Layout ---
+                # We want Math on top or side? 
+                # Let's put Math in an expander to save space for the rich plots
                 
                 is_azimuth = "Azimuth" in sim_mode
                 N = rx_elements_total if is_azimuth else tx_elements_total
                 d = d_rx if is_azimuth else d_tx
                 theta_gr = theta_gr_rx if is_azimuth else theta_gr_tx
-                
-                with c_math:
-                    st.markdown("### Math & Formulas")
+
+                with st.expander("Math & Formulas", expanded=False):
                     st.markdown("**Array Factor (AF):**")
                     st.latex(r"AF(\theta) = \left| \sum_{n=0}^{N-1} w_n \cdot e^{j \frac{2\pi}{\lambda} n d \sin(\theta)} \right|")
                     st.markdown(f"**N**: {N} elements")
@@ -1077,62 +1086,168 @@ elif selected_tool == "RADAR Calculator":
                     elif "Hanning" in window_type:
                         st.latex(r"w_n = 0.5 \left(1 - \cos\left(\frac{2\pi n}{N-1}\right)\right)")
                     elif "Blackman" in window_type:
-                         st.latex(r"w_n = 0.42 - 0.5 \cos\left(\frac{2\pi n}{N-1}\right) + 0.08 \cos\left(\frac{4\pi n}{N-1}\right)")
+                        st.latex(r"w_n = 0.42 - 0.5 \cos\left(\frac{2\pi n}{N-1}\right) + 0.08 \cos\left(\frac{4\pi n}{N-1}\right)")
                     else:
                         st.latex(r"w_n = 1 \quad \text{(Rectangular)}")
                 
-                # Windowing
+                # --- Calculation ---
+                # 1. Weights for "Real" (Windowed) Pattern
                 if "Hamming" in window_type:
-                    weights = np.hamming(N)
+                    weights_real = np.hamming(N)
                 elif "Hanning" in window_type:
-                    weights = np.hanning(N)
+                    weights_real = np.hanning(N)
                 elif "Blackman" in window_type:
-                    weights = np.blackman(N)
+                    weights_real = np.blackman(N)
                 else:
-                    weights = np.ones(N)
+                    weights_real = np.ones(N)
+
+                # 2. Weights for "Theoretical" (Virtual High-Density Array)
+                # Goal: Match Aperture Length L but use N=1000 to kill Grating Lobes.
+                L_real = (N - 1) * d
+                if L_real <= 0: L_real = 0.001 # Safety
+
+                N_virtual = 1000
+                d_virtual = L_real / (N_virtual - 1) if N_virtual > 1 else L_real
+
+                if "Hamming" in window_type:
+                    weights_theory = np.hamming(N_virtual)
+                elif "Hanning" in window_type:
+                    weights_theory = np.hanning(N_virtual)
+                elif "Blackman" in window_type:
+                    weights_theory = np.blackman(N_virtual)
+                else:
+                    weights_theory = np.ones(N_virtual)
                     
-                # Calculation
-                theta_deg = np.linspace(-90, 90, 1000)
+                # Theta Array with user resolution
+                # theta_deg = np.linspace(-90, 90, 1000) # Old
+                theta_deg = np.arange(-90, 90 + sim_res/2, sim_res)
                 theta_rad = np.deg2rad(theta_deg)
+                
                 k = 2 * np.pi / wavelength
                 
-                # Vectorized AF
-                # phases = k * d * n * sin(theta)
-                # n from 0 to N-1
-                n = np.arange(N)
-                u = np.sin(theta_rad)
-                # (N, 1) * (1, 1000) -> (N, 1000)
-                phases = k * d * n[:, np.newaxis] * u[np.newaxis, :]
+                # Vectorized AF Calculation Helper
+                def compute_af_db(w, th_rad, n_elems, spacing):
+                    # phases = k * d * n * sin(theta)
+                    n_idx = np.arange(n_elems)
+                    u = np.sin(th_rad)
+                    phases = k * spacing * n_idx[:, np.newaxis] * u[np.newaxis, :]
+                    
+                    # Sum
+                    af_c = np.abs(np.sum(w[:, np.newaxis] * np.exp(1j * phases), axis=0))
+                    
+                    # Normalize
+                    af_max_val = np.max(af_c)
+                    if af_max_val > 0:
+                        af_n = af_c / af_max_val
+                        return 20 * np.log10(af_n + 1e-12)
+                    else:
+                        return np.zeros_like(af_c) - 60
+
+                af_db_real = compute_af_db(weights_real, theta_rad, N, d)
+                af_db_theory = compute_af_db(weights_theory, theta_rad, N_virtual, d_virtual)
                 
-                # Sum weighted complex exponentials
-                # (N, 1) * (N, 1000) -> sum axis 0
-                af = np.abs(np.sum(weights[:, np.newaxis] * np.exp(1j * phases), axis=0))
+                # --- Visualization (Dual View) ---
+                col_polar, col_rect = st.columns(2)
                 
-                # Normalize to dB
-                af_max = np.max(af)
-                if af_max > 0:
-                    af_norm = af / af_max
-                    af_db = 20 * np.log10(af_norm + 1e-12)
-                else:
-                    af_db = np.zeros_like(af) - 60
-                
-                # Plot
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=theta_deg, y=af_db, mode='lines', name='Beam Pattern'))
-                
-                # Grating Lobes Lines
-                if theta_gr is not None:
-                    fig.add_vline(x=theta_gr, line_dash="dash", line_color="red", annotation_text="Grating Lobe")
-                    fig.add_vline(x=-theta_gr, line_dash="dash", line_color="red")
-                
-                fig.update_layout(title=f"Beam Pattern ({'Azimuth' if is_azimuth else 'Elevation'})",
-                                  xaxis_title="Angle (deg)",
-                                  yaxis_title="Amplitude (dB)",
-                                  yaxis_range=[-60, 0],
-                                  height=500)
-                
-                with c_plot:
-                    st.plotly_chart(fig, use_container_width=True)
+                # 1. Polar Plot (Radar View)
+                # Helper for Polar DB: Shift so -60 is center (0) and 0 is edge (60)
+                def to_polar_db(db_vals, min_db=-60):
+                    return np.maximum(db_vals, min_db) - min_db
+
+                with col_polar:
+                    fig_polar = go.Figure()
+                    
+                    # Theory (Gray Dashed)
+                    fig_polar.add_trace(go.Scatterpolar(
+                        r=to_polar_db(af_db_theory), 
+                        theta=theta_deg,
+                        mode='lines',
+                        line=dict(color='gray', dash='dash', width=1),
+                        name='Theoretical'
+                    ))
+                    
+                    # Real (Blue Filled)
+                    fig_polar.add_trace(go.Scatterpolar(
+                        r=to_polar_db(af_db_real),
+                        theta=theta_deg,
+                        mode='lines', 
+                        fill='toself',
+                        line=dict(color='blue', width=2),
+                        name='Real Pattern'
+                    ))
+                    
+                    # Grating Lobes
+                    if theta_gr is not None:
+                         # Radial lines at theta_gr
+                         # r goes from 0 to 60 (representing -60 to 0)
+                         fig_polar.add_trace(go.Scatterpolar(
+                             r=[0, 60], theta=[theta_gr, theta_gr],
+                             mode='lines', line=dict(color='red', dash='dash', width=2),
+                             name='Grating Lobe'
+                         ))
+                         fig_polar.add_trace(go.Scatterpolar(
+                             r=[0, 60], theta=[-theta_gr, -theta_gr],
+                             mode='lines', line=dict(color='red', dash='dash', width=2),
+                             showlegend=False
+                         ))
+
+                    fig_polar.update_layout(
+                        title="Polar View",
+                        polar=dict(
+                            radialaxis=dict(
+                                visible=True, 
+                                range=[0, 60],
+                                tickmode='array',
+                                tickvals=[0, 15, 30, 45, 60],
+                                ticktext=['-60dB', '-45dB', '-30dB', '-15dB', '0dB']
+                            ),
+                            angularaxis=dict(direction="clockwise", rotation=90)
+                        ),
+                        height=500,
+                        margin=dict(l=30, r=30, t=30, b=30),
+                        showlegend=True,
+                        legend=dict(x=0.5, y=-0.15, xanchor='center', orientation='h')
+                    )
+                    st.plotly_chart(fig_polar, use_container_width=True)
+
+                # 2. Rectangular Plot (Engineering View)
+                with col_rect:
+                    fig_rect = go.Figure()
+                    
+                    # Theory
+                    fig_rect.add_trace(go.Scatter(
+                        x=theta_deg, y=af_db_theory,
+                        mode='lines',
+                        line=dict(color='gray', dash='dash'),
+                        name='Theoretical'
+                    ))
+                    
+                    # Real
+                    fig_rect.add_trace(go.Scatter(
+                        x=theta_deg, y=af_db_real,
+                        mode='lines',
+                        line=dict(color='blue'),
+                        name='Real Pattern'
+                    ))
+                    
+                    # Grating Lobes
+                    if theta_gr is not None:
+                        fig_rect.add_vline(x=theta_gr, line_dash="dash", line_color="red", annotation_text="GL")
+                        fig_rect.add_vline(x=-theta_gr, line_dash="dash", line_color="red", annotation_text="GL")
+
+                    fig_rect.update_layout(
+                        title="Rectangular View (Engineering)",
+                        xaxis_title="Angle (deg)",
+                        yaxis_title="Amplitude (dB)",
+                        xaxis=dict(range=[-90, 90], dtick=30),
+                        yaxis=dict(range=[-60, 0]),
+                        height=500,
+                        margin=dict(l=30, r=30, t=30, b=30),
+                        showlegend=True,
+                        legend=dict(x=0.5, y=-0.15, xanchor='center', orientation='h'),
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(fig_rect, use_container_width=True)
 
             # E. GUI Outputs
             st.markdown("---")
@@ -1177,19 +1292,35 @@ elif selected_tool == "RADAR Calculator":
             st.markdown("### Inputs")
             
             # A. Frequency
-            with st.expander("1. Frequency", expanded=True):
-                f_start = st.number_input("Start Frequency (GHz)", value=76.0, step=0.1, format="%.2f")
-                f_stop = st.number_input("Stop Frequency (GHz)", value=79.0, step=0.1, format="%.2f")
+            with st.expander("1. Frequency / Wavelength", expanded=True):
+                freq_input_mode = st.radio("Input Mode", ["Start/Stop Frequencies", "Manual Wavelength (mm)"], horizontal=True)
                 
-                f_c = (f_start + f_stop) / 2.0
-                if f_c > 0:
-                    wavelength_m = 3e8 / (f_c * 1e9) 
-                else:
-                    wavelength_m = 0
-                
-                st.write(f"$f_c$: **{f_c:.2f} GHz**")
-                st.write(f"$\\lambda$: **{wavelength_m * 1000:.2f} mm**")
-                st.caption(f"Formula: $\\lambda = c / f_c$")
+                if freq_input_mode == "Start/Stop Frequencies":
+                    f_start = st.number_input("Start Frequency (GHz)", value=76.0, step=0.1, format="%.2f")
+                    f_stop = st.number_input("Stop Frequency (GHz)", value=79.0, step=0.1, format="%.2f")
+                    
+                    f_c = (f_start + f_stop) / 2.0
+                    if f_c > 0:
+                        wavelength_m = 3e8 / (f_c * 1e9) 
+                    else:
+                        wavelength_m = 0
+                    
+                    st.write(f"$f_c$: **{f_c:.2f} GHz**")
+                    st.write(f"$\\lambda$: **{wavelength_m * 1000:.2f} mm**")
+                    st.caption(f"Formula: $\\lambda = c / f_c$")
+                    
+                else: # Manual Wavelength
+                    lambda_mm = st.number_input("Wavelength $\\lambda$ (mm)", value=3.90, step=0.01, format="%.3f")
+                    wavelength_m = lambda_mm / 1000.0
+                    
+                    if wavelength_m > 0:
+                        f_c = 3e8 / wavelength_m / 1e9
+                    else:
+                        f_c = 0
+                        
+                    st.write(f"$\\lambda$: **{lambda_mm:.3f} mm**")
+                    st.write(f"Derived $f_c$: **{f_c:.2f} GHz**")
+                    st.caption(f"Formula: $f_c = c / \\lambda$")
                 
             # B. Transmit Chain
             with st.expander("2. Transmit Chain", expanded=True):
@@ -1378,26 +1509,59 @@ elif selected_tool == "RADAR Calculator":
                       Temp_term_db + BW_term_db + Loss_term_db)
             
             # Construct DataFrame for Radar Table
+            # Pre-calculate linear values for display
+            P_t_lin = 10**(P_t_dbm/10.0) / 1000.0 # Watts
+            G_elm_sq_lin = 10**(G_elm_sq_db/10.0)
+            Lambda_sq_lin = wavelength_m**2 # m^2
+            Sigma_lin = 10**(Sigma_db/10.0) # m^2
+            G_proc_lin = 10**(G_proc_db/10.0)
+            Const_term_lin = 1 / ((4 * math.pi)**3)
+            Range_term_lin = 1 / (R_m**4)
+            Boltzmann_lin = 1.380649e-23 # J/K
+            # Boltzmann term in DB was +228.6 which is -10*log(k). So k = 10^(-228.6/10) ??
+            # Wait, 10*log10(k) = 10*log10(1.38e-23) = -228.6.
+            # So -10*log10(k) = +228.6.
+            # Term is CONSTANT TERM + ... + BOLTZMANN
+            # Radar Equation: SNR = (Pt * G^2 * lambda^2 * sigma * G_proc) / ((4pi)^3 * R^4 * k * T * B * L)
+            # In dB: Pt + G^2 + lam^2 + sig + G_proc - (4pi)^3 - R^4 - k - T - B - L
+            # - k_db = - ( -228.6 ) = +228.6. Correct.
+            
+            Temp_lin = T_sys_K
+            BW_lin = W_bb_hz
+            Loss_lin = 10**(L_sys_db/10.0)
+
+            # RCS Comment
+            if tgt_mode == "Disc":
+                sigma_comment = r"Calculated ($\sigma \propto 1/\lambda^2$)"
+            else:
+                sigma_comment = "User input"
+            
             lb_data = [
-                ["Transmit Power", "P_t", f"{P_t_dbw:.1f} dBW", "User input (converted)"],
-                ["Antenna Gain Sq.", "G_elm^2", f"{G_elm_sq_db:.1f} dB", "2 * G_elm"],
-                ["Wavelength Term", "lambda^2", f"{Lambda_sq_db:.1f} dB", "20 * log10(lambda)"],
-                ["Target RCS", "sigma_t", f"{Sigma_db:.1f} dBsm", "User input"],
-                ["Processing Gain", "G_proc", f"{G_proc_db:.1f} dB", "10 * log10(N_tx * N_rx)"],
-                ["Constant Term", "1/(4pi)^3", f"{Const_term_db:.1f} dB", "-33 dB"],
-                ["Range Term", "1/R^4", f"{Range_term_db:.1f} dB", "-40 * log10(R)"],
-                ["Boltzmann", "1/K", f"+228.6 dB", "Constant"],
-                ["Noise Temperature", "1/T_sys", f"{Temp_term_db:.1f} dB", "-10 * log10(T_sys)"],
-                ["Bandwidth Term", "1/W_BB", f"{BW_term_db:.1f} dB", "-10 * log10(W_BB)"],
-                ["Loss Term", "1/L_sys", f"{Loss_term_db:.1f} dB", "- Sum(Losses)"],
-                ["Final SNR", "SNR", f"**{SNR_db:.2f} dB**", "Sum of all terms"]
+                ["Transmit Power", "$P_t$", f"{P_t_dbw:.1f} dBW", f"{format_eng(P_t_lin)}W", "User input (converted)"],
+                ["Antenna Gain Sq.", "$G_{elm}^2$", f"{G_elm_sq_db:.1f} dB", f"{format_eng(G_elm_sq_lin)}", "2 * G_elm"],
+                ["Wavelength Term", "$\lambda^2$", f"{Lambda_sq_db:.1f} dB", f"{format_eng(Lambda_sq_lin)}m²", "20 * log10(lambda)"],
+                ["Target RCS", "$\sigma_t$", f"{Sigma_db:.1f} dBsm", f"{format_eng(Sigma_lin)}m²", sigma_comment],
+                ["Processing Gain", "$G_{proc}$", f"{G_proc_db:.1f} dB", f"{format_eng(G_proc_lin)}", "10 * log10(N_tx * N_rx)"],
+                ["Constant Term", "$1/(4\pi)^3$", f"{Const_term_db:.1f} dB", f"{format_eng(Const_term_lin)}", "-33 dB"],
+                ["Range Term", "$1/R^4$", f"{Range_term_db:.1f} dB", f"{format_eng(Range_term_lin)}m⁻⁴", "-40 * log10(R)"],
+                ["Boltzmann", "$1/k$", f"+228.6 dB", f"{format_eng(1/Boltzmann_lin)} J⁻¹K⁻¹", "Constant"],
+                ["Noise Temperature", "$1/T_{sys}$", f"{Temp_term_db:.1f} dB", f"{format_eng(1/Temp_lin)} K⁻¹", "-10 * log10(T_sys)"],
+                ["Bandwidth Term", "$1/W_{BB}$", f"{BW_term_db:.1f} dB", f"{format_eng(1/BW_lin)} Hz⁻¹", "-10 * log10(W_BB)"],
+                ["Loss Term", "$1/L_{sys}$", f"{Loss_term_db:.1f} dB", f"{format_eng(1/Loss_lin)}", "- Sum(Losses)"],
+                ["Final SNR", "SNR", f"**{SNR_db:.2f} dB**", f"{format_eng(10**(SNR_db/10.0))}", "Sum of all terms"]
             ]
-            lb_df = pd.DataFrame(lb_data, columns=["Term", "Symbol", "Value (dB)", "Formula / Comment"])
+            lb_df = pd.DataFrame(lb_data, columns=["Term", "Symbol", "Value (dB)", "Value (Lin)", "Formula / Comment"])
             
             # Render into the container (which is physically above the Loss Table)
             with container_radar_table:
+                # Add Full Equation
+                st.markdown("### Radar Equation")
+                st.latex(r"SNR = \frac{P_t G_{elm}^2 \lambda^2 \sigma G_{proc}}{(4\pi)^3 R^4 k T_{sys} W_{BB} L_{sys}}")
+                
                 st.markdown("### Radar Equation Table")
                 st.table(lb_df)
                 st.success(f"**Calculated SNR: {SNR_db:.2f} dB**")
                 st.caption("Formula: $SNR_{dB} = 10 \\log_{10}(SNR_{lin})$")
+                
+
 
