@@ -145,7 +145,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 2.2"
+APP_VERSION = "Rev 3.05"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -275,6 +275,7 @@ elif selected_tool == "RADAR Calculator":
 st.sidebar.markdown("---")
 st.sidebar.write("**Contact**: uv.peleg@gmail.com")
 st.sidebar.write(f"**{APP_VERSION}**")
+st.sidebar.info("Special thanks to Dr. Gideon Levita for providing guidance and helping build this tool.")
 
 
 # --- Tool Logic ---
@@ -574,37 +575,41 @@ elif selected_tool == "RADAR Calculator":
         col_nf1, col_nf2 = st.columns([1, 1])
         
         with col_nf1:
-            d_ant = st.number_input("Antenna Size D (m)", value=0.1, min_value=0.001, format="%.4f")
+            # Synced Inputs
+            if 'nf_freq' not in st.session_state: st.session_state.nf_freq = 77.0
+            if 'nf_wav' not in st.session_state: st.session_state.nf_wav = 299.792 / 77.0 # Wavelength in mm for 77 GHz
             
-            # Using 77 GHz for calculation as logic implies or generic lambda
-            # "Logic: Calculate R = 2 D^2 / lambda (Use 77 GHz)" - Use 77GHz fixed?
-            # Prompt says "Use 77 GHz". So we default to that or just use it.
-            # But the existing tool had "Input Mode" for Wavelength vs Freq.
-            # The prompt says: "Input: Antenna size (D) in meters. Logic: Calculate R = 2 D^2 / lambda (Use 77 GHz)."
-            # This sounds like a simplified tool.
-            # However, "Maintain Existing" usually implies keeping the existing UI if it works.
-            # But "Logic ... (Use 77 GHz)" suggests simplification.
-            # I will stick to "Maintain Existing" for features but ensure 77GHz is default/used if user doesn't specify.
-            # Actually, "Maintain Existing" is strong. I'll keep the flexibility but ensure 77GHz is the default.
+            def update_wav_from_freq():
+                if st.session_state.nf_freq > 0:
+                    st.session_state.nf_wav = 299.792 / st.session_state.nf_freq
             
-            freq_val = 77.0
-            wavelength = 3e8 / (freq_val * 1e9)
+            def update_freq_from_wav():
+                if st.session_state.nf_wav > 0:
+                    st.session_state.nf_freq = 299.792 / st.session_state.nf_wav
+
+            d_ant = st.number_input("Antenna Size D (m)", value=1.32, min_value=0.001, format="%.4f")
             
-            st.write(f"Frequency: **{freq_val} GHz** (Fixed for this tool based on Rev 2 Spec if strictly followed, else keep flexible)")
-            # Let's keep it simple as per prompt "Input: Antenna Size (D)". Logic: Use 77GHz.
-            # So I will remove the frequency input to match "Input: Antenna Size" strictly.
+            # Use columns for synced inputs
+            c_nf_sub1, c_nf_sub2 = st.columns(2)
+            with c_nf_sub1:
+                st.number_input("Frequency (GHz)", key='nf_freq', step=0.1, format="%.2f", on_change=update_wav_from_freq)
+            with c_nf_sub2:
+                st.number_input("Wavelength (mm)", key='nf_wav', step=0.01, format="%.4f", on_change=update_freq_from_wav)
+
+            wavelength_m = st.session_state.nf_wav / 1000.0
             
-            r_ff = (2 * d_ant**2) / wavelength
-            
+            if wavelength_m > 0:
+                r_ff = (2 * d_ant**2) / wavelength_m
+            else:
+                r_ff = 0
+
+            st.markdown("---")
             st.latex(r"R_{FF} = \frac{2 D^2}{\lambda}")
             st.success(f"**Near Field Boundary:** {r_ff:.4f} m")
             st.info(f"**In Kilometers:** {r_ff/1000:.6f} km")
                 
         with col_nf2:
-            try:
-                st.image("near_field_diagram.png", caption="Near Field vs Far Field")
-            except:
-                st.warning("Image not found.")
+            st.image("near_field_diagram.png", caption="Antenna Regions: Near Field vs Far Field")
                 
     elif radar_tool == "FMCW Range Resolver":
         st.subheader("FMCW Range Resolver")
@@ -804,480 +809,439 @@ elif selected_tool == "RADAR Calculator":
 
         else:
             st.success("Access Granted.")
+            
+            # --- Main Interface ---
+            # A. Sidebar Inputs (Moved to Main for this tool due to complexity)
+            # Actually user asked for "Sidebar Inputs" but Streamlit Sidebar is global. 
+            # Prompt says "A. Sidebar Inputs". I'll put them in an expander or Sidebar?
+            # "Sidebar Inputs: ...". Usually means st.sidebar.
+            # But since it's a tab, putting tool-specific controls in sidebar is tricky if user switches tabs.
+            # Best practice in Streamlit "Tools" approach is to check `if selected_tool == ...` inside sidebar.
+            # Or just put them in the main area col1. 
+            # Given the "Sidebar Inputs" title, I'll put them in a dedicated left column or expander that ACTS like a sidebar for this tool.
+            # Let's use an Expander "Configuration" as before, but detailed.
+            
             st.info("""
-            **T-Shape Array Visualizer**
-            This tool simulates the beam pattern of a T-shape MIMO array source.
-            
-            *   **Blue Line (Real)**: The pattern of your specific array configuration (including Grating Lobes).
-            *   **Gray Dashed Line (Theoretical)**: A reference pattern from a "perfect" high-density array ($N=1000$) with the **same aperture length and windowing**. It shows the ideal pattern without grating lobes.
+            **T-Shape Array Visualizer (Major Update)**
+            Simulates beam patterns with Steering, Windowing, and Dual-View visualization.
             """)
-
-            # A. Inputs (Moved to Main Window)
-            with st.expander("Configuration", expanded=True):
-                # 1. Top Level Config
-                c_conf1, c_conf2 = st.columns(2)
-                with c_conf1:
+            
+            with st.expander("Configuration / Sidebar", expanded=True):
+                # 1. General Config
+                c_gen1, c_gen2, c_gen3 = st.columns(3)
+                with c_gen1:
                     ts_freq = st.number_input("Frequency (GHz)", value=77.0, step=0.1, format="%.2f")
-                with c_conf2:
-                    design_mode = st.radio("Design Mode", ["Hardware (Fixed Elements)", "Theoretical (Fixed Aperture)"], horizontal=True)
+                with c_gen2:
+                    sim_res = st.number_input("Resolution (deg)", value=0.01, min_value=0.01, max_value=1.0, step=0.01, format="%.3f", help="Simulation angular step")
+                with c_gen3:
+                     # Calculate Lambda for reference
+                    wavelength_mm = 300.0 / ts_freq if ts_freq > 0 else 0
+                    st.write(f"$\\lambda$: **{wavelength_mm:.2f} mm**")
 
                 st.markdown("---")
-
-                c1, c2, c3, c4 = st.columns(4)
+                # 2. Structure Config
+                c_struct1, c_struct2, c_struct3, c_struct4 = st.columns(4)
+                with c_struct1:
+                    num_rx_mods = st.number_input("RX Modules", value=3, min_value=1, step=1)
+                with c_struct2:
+                    rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.50, step=0.01, format="%.2f")
+                with c_struct3:
+                    num_tx_mods = st.number_input("TX Modules", value=3, min_value=1, step=1)
+                with c_struct4:
+                    tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f")
                 
-                # Initialize variables to ensure scope
-                num_rx_mods = 1
-                num_tx_mods = 1
-                rx_aperture_m = 0.5
-                tx_aperture_m = 0.5
-                
-                if design_mode == "Hardware (Fixed Elements)":
-                     with c1:
-                        num_rx_mods = st.number_input("RX Modules", value=3, min_value=1, step=1, help="Horizontal Array")
-                     with c2:
-                        rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.50, step=0.01, format="%.2f", key="rx_space_hw")
-                     with c3:
-                        num_tx_mods = st.number_input("TX Modules", value=3, min_value=1, step=1, help="Vertical Array")
-                     with c4:
-                        tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f", key="tx_space_hw")
-                     
-                     st.caption(f"**Physical Module Size (Fixed):** RX = 440 mm | TX = 440 mm")
-                else:
-                     with c1:
-                        rx_aperture_m = st.number_input("RX Aperture (m)", value=0.5, min_value=0.01, step=0.01, format="%.3f")
-                     with c2:
-                        rx_spacing_mm = st.number_input("RX Spacing (mm)", value=2.50, step=0.01, format="%.2f", key="rx_space_th")
-                     with c3:
-                        tx_aperture_m = st.number_input("TX Aperture (m)", value=0.5, min_value=0.01, step=0.01, format="%.3f")
-                     with c4:
-                        tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f", key="tx_space_th")
+                st.markdown("---")
+                # 3. Beam Control
+                c_beam1, c_beam2 = st.columns([2, 1])
+                with c_beam1:
+                    theta_scan = st.slider("Steering Angle (deg)", -60.0, 60.0, 0.0, step=1.0)
+                with c_beam2:
+                    window_type = st.selectbox("Windowing", ["None", "Hamming", "Hanning", "Blackman"])
 
                 st.markdown("---")
-                c_mode1, c_mode2, c_mode3 = st.columns(3)
-                with c_mode1:
-                    sim_mode = st.selectbox("Radio Mode", ["Physical Geometry", "Beam Pattern (Azimuth)", "Beam Pattern (Elevation)"])
-                with c_mode2:
-                    window_type = st.selectbox("Windowing", ["None (Rectangular)", "Hamming", "Hanning", "Blackman"])
-                with c_mode3:
-                    sim_res = st.number_input("Simulation Resolution (deg)", value=0.1, min_value=0.01, max_value=1.0, step=0.01, format="%.2f")
+                # 4. Mode
+                sim_mode = st.radio("Mode", ["Physical Geometry", "Beam Pattern (Azimuth)", "Beam Pattern (Elevation)"], horizontal=True)
 
-            # B. Architecture Logic
-            # B. Architecture Logic
-            if design_mode == "Hardware (Fixed Elements)":
-                # Fixed Module Dimensions (mm)
-                RX_MOD_LEN_MM = 440.0
-                TX_MOD_LEN_MM = 440.0
-
-                # RX Calculations
-                if rx_spacing_mm <= 0: rx_spacing_mm = 0.001
-                elements_per_rx_mod = int(math.floor(RX_MOD_LEN_MM / rx_spacing_mm))
-                rx_elements_total = num_rx_mods * elements_per_rx_mod
-                rx_awr_count = math.ceil(rx_elements_total / 4) # 4 channels per AWR2243
-
-                # TX Calculations
-                if tx_spacing_mm <= 0: tx_spacing_mm = 0.001
-                elements_per_tx_mod = int(math.floor(TX_MOD_LEN_MM / tx_spacing_mm))
-                tx_elements_total = num_tx_mods * elements_per_tx_mod
-                tx_awr_count = math.ceil(tx_elements_total / 3) # 3 channels per AWR2243 (typ) OR 4? User said "based on channels per AWR2243 as already defined". 
-                # Old code had: rx_ant_per_chip = 4, tx_ant_per_chip = 3. So 3 is correct.
-
-                # Display Hardware Summary
-                st.info(f"**Hardware Logic (Fixed {RX_MOD_LEN_MM:.0f}mm Modules):**\n\n"
-                        f"**RX Array:** {num_rx_mods} Mods $\\times$ {elements_per_rx_mod} elems = **{rx_elements_total} Total Elements**\n"
-                        f"Requires **{rx_awr_count}** AWR2243 Devices (4 ch/chip)\n\n"
-                        f"**TX Array:** {num_tx_mods} Mods $\\times$ {elements_per_tx_mod} elems = **{tx_elements_total} Total Elements**\n"
-                        f"Requires **{tx_awr_count}** AWR2243 Devices (3 ch/chip)")
-            else:
-                # Theoretical Mode
-                d_rx = rx_spacing_mm / 1000.0
-                d_tx = tx_spacing_mm / 1000.0
-                
-                if d_rx > 0:
-                    rx_elements_total = int(rx_aperture_m / d_rx) + 1
-                    # Ensure at least 2 elements
-                    if rx_elements_total < 2: rx_elements_total = 2
-                else:
-                    rx_elements_total = 2
-                    
-                if d_tx > 0:
-                    tx_elements_total = int(tx_aperture_m / d_tx) + 1
-                    if tx_elements_total < 2: tx_elements_total = 2
-                else:
-                    tx_elements_total = 2
-                    
-                # Mock module definition for visualization
-                elements_per_rx_mod = rx_elements_total
-                num_rx_mods = 1
-                elements_per_tx_mod = tx_elements_total
-                num_tx_mods = 1
-            
-            # C. Physics & Math Engine
-            d_rx = rx_spacing_mm / 1000.0 # meters
-            d_tx = tx_spacing_mm / 1000.0 # meters
+            # --- Physics Engine ---
+            # Constants
             wavelength = 3e8 / (ts_freq * 1e9)
+            k = 2 * np.pi / wavelength
             
-            # Grating Lobe Check
-            gl_issues = []
-            theta_gr_rx = None
-            theta_gr_tx = None
-            
-            if d_rx > wavelength / 2:
-                val = wavelength / d_rx
-                if val <= 1:
-                    theta_gr_rx = np.degrees(np.arcsin(val))
-                    gl_issues.append(f"RX Array (Azimuth): Grating Lobes at ±{theta_gr_rx:.1f}°")
-            
-            if d_tx > wavelength / 2:
-                val = wavelength / d_tx
-                if val <= 1:
-                    theta_gr_tx = np.degrees(np.arcsin(val))
-                    gl_issues.append(f"TX Array (Elevation): Grating Lobes at ±{theta_gr_tx:.1f}°")
+            # Helper: Steered AF (Numeric Solver)
+            def solve_array_factor(n_elems, spacing_m, w_name, scan_angle_deg, res_deg):
+                # 1. Setup
+                theta_scan_rad = np.radians(scan_angle_deg)
+                
+                # Windowing Weights
+                if w_name == "Hamming":
+                    weights = np.hamming(n_elems)
+                elif w_name == "Hanning":
+                    weights = np.hanning(n_elems)
+                elif w_name == "Blackman":
+                    weights = np.blackman(n_elems)
+                else:
+                    weights = np.ones(n_elems)
+                
+                # 2. Angle Vector (High Res)
+                # Ensure we cover -90 to 90
+                theta_deg = np.arange(-90, 90 + res_deg/2, res_deg)
+                theta_rad = np.radians(theta_deg)
+                
+                # 3. Calculation: AF = sum( w_n * exp(j * k * n * d * (sin(th) - sin(th_scan))) )
+                n_idx = np.arange(n_elems)
+                
+                # Vectorized
+                # u = sin(Theta) - sin(Theta_scan)
+                u = np.sin(theta_rad) - np.sin(theta_scan_rad)
+                
+                # phases [N, Theta] = k * d * n * u
+                # To broadcast: n_idx[:, None] * u[None, :]
+                phases = k * spacing_m * n_idx[:, np.newaxis] * u[np.newaxis, :]
+                
+                # Sum over N
+                af_complex = np.sum(weights[:, np.newaxis] * np.exp(1j * phases), axis=0)
+                af_mag = np.abs(af_complex)
+                
+                # Normalize (Peak = 0 dB)
+                peak_val = np.max(af_mag)
+                if peak_val > 0:
+                    af_norm = af_mag / peak_val
+                    af_db = 20 * np.log10(af_norm + 1e-12)
+                else:
+                    af_db = np.zeros_like(af_mag) - 60
+                    
+                peak_gain_lin = peak_val
+                # Approximation of Director Gain is complex, we just show Relative Peak usually or Peak Sum
+                # But user asked for "Main Beam Peak Gain". 
+                # For array factor, Max Gain = Sum(weights). 
+                # If weights are 1, Gain = N.
+                main_beam_gain_lin = np.sum(weights)
+                main_beam_gain_db = 20 * np.log10(main_beam_gain_lin) if main_beam_gain_lin > 0 else 0
+                
+                # 4. Numeric Resolution Solver
+                # Find index of max
+                idx_max = np.argmax(af_mag)
+                peak_angle = theta_deg[idx_max]
+                
+                # Find -3dB points (or exactly 1/sqrt(2) points)
+                # Threshold = Peak_Linear / sqrt(2)
+                # In dB, this is 20*log10(1/sqrt(2)) ~= -3.01 dB
+                target_level = 1.0 / np.sqrt(2.0)
+                
+                # Search Right
+                idx_right = idx_max
+                for i in range(idx_max, len(af_norm)):
+                    if af_norm[i] < target_level:
+                        idx_right = i
+                        break
+                angle_right = theta_deg[idx_right]
+                
+                # Search Left
+                idx_left = idx_max
+                for i in range(idx_max, -1, -1):
+                    if af_norm[i] < target_level:
+                        idx_left = i
+                        break
+                angle_left = theta_deg[idx_left]
 
-            # D. Visualization
+                # Exact interpolation could be better, but grid search with sim_res is sufficient if sim_res is small.
+                resolution = abs(angle_right - angle_left)
+                
+                return {
+                    "theta": theta_deg,
+                    "af_db": af_db,
+                    "resolution": resolution,
+                    "gain_db": main_beam_gain_db,
+                    "weights": weights
+                }
+
+            # --- Logic Branching ---
+            
+            # Hardware Config Calculation
+            # RX Logic
+            # Fixed HW Size assumption or just standard "Elements per module"?
+            # Hardware Config Calculation (Module-First Logic)
+            RX_MOD_LEN_MM = 440.0
+            TX_MOD_LEN_MM = 440.0
+            MOD_WIDTH_MM = 150.0 # From prompt
+            
+            # RX Logic
+            rx_total_len_mm = num_rx_mods * RX_MOD_LEN_MM
+            rx_total_elems = math.floor(rx_total_len_mm / rx_spacing_mm)
+            rx_chips = math.ceil(rx_total_elems / 4.0)
+            
+            # TX Logic
+            tx_total_len_mm = num_tx_mods * TX_MOD_LEN_MM
+            tx_total_elems = math.floor(tx_total_len_mm / tx_spacing_mm)
+            tx_chips = math.ceil(tx_total_elems / 3.0)
+            
+            d_rx_m = rx_spacing_mm / 1000.0
+            d_tx_m = tx_spacing_mm / 1000.0
+            
+            # --- Inventory ---
+            st.markdown("#### Hardware Inventory")
+            c_inv1, c_inv2, c_inv3 = st.columns(3)
+            with c_inv1:
+                st.info(f"**Total Array Size:** {rx_total_len_mm/1000:.2f}m (H) x {tx_total_len_mm/1000:.2f}m (V)")
+            with c_inv2:
+                total_chips = rx_chips + tx_chips
+                st.info(f"**Total AWR2243 Chips:** {total_chips} ({rx_chips} RX + {tx_chips} TX)")
+            with c_inv3:
+                st.info(f"**Total Antennas:** {rx_total_elems + tx_total_elems} ({rx_total_elems} RX + {tx_total_elems} TX)")
+
+            # --- Visualization ---
+            
             if sim_mode == "Physical Geometry":
-                st.markdown("#### Physical Geometry")
+                st.subheader("Physical Geometry")
                 
                 fig = go.Figure()
                 
-                # RX Elements (Blue, X-axis, Y=0ish)
-                # Center the array
-                rx_coords = (np.arange(rx_elements_total) - (rx_elements_total - 1)/2) * d_rx
-                rx_y_pos = 0.0
+                # --- RX Array (Horizontal) ---
+                # Board
+                rx_board_w_m = RX_MOD_LEN_MM / 1000.0
+                rx_board_h_m = MOD_WIDTH_MM / 1000.0
                 
-                # Module Outline (Dynamic Sizing)
-                # Assume RX modules are arranged horizontally, side-by-side.
-                # Total width = num_rx_mods * elements_per_rx_mod * d_rx (approx)
-                # Actually, physical module size should probably wrap the elements.
-                # Elements per mod = 176.
-                # Width = 176 * d_rx. Height = ??? (Fixed or scaling?)
-                # User's complaint: "different antenna density of same size".
-                # Means if spacing changes, the dots move but the box stays same size => density visually changes.
-                # We want the box to shrink/grow with the dots.
+                # Draw RX Module Rectangles
+                # Total Width = Num_Mods * Mod_Len. Centered at 0.
+                total_rx_w = num_rx_mods * rx_board_w_m
+                start_x = -total_rx_w / 2.0 + rx_board_w_m / 2.0
                 
-                # Dynamic Width based on spacing
-                # 4 chips/board * 4 ants/chip = 16 ants/board? No.
-                # Logic says: 4 rx_ant_per_chip, 11 rx_chips_per_board, 4 rx_boards_per_mod.
-                # Total 176 elements horizontal.
-                
-                # In Design Mode, elements_per_rx_mod is set.
-                # Width = Fixed 440mm per module in Hardware mode
-                if design_mode == "Hardware (Fixed Elements)":
-                    mod_w_rx = 0.440 # 440 mm
-                else:
-                    mod_w_rx = elements_per_rx_mod * d_rx
-                
-                # Height is structural, let's keep it fixed or proportional. 
-                # Let's keep height fixed as spacing usually affects the array axis.
-                mod_h_rx = 0.15
-                
-                # Calculate centers of RX modules
-                # They are centered around 0.
-                # i counts 0 to num-1
-                # Center(i) = (i - (num-1)/2) * mod_w_rx
                 for i in range(num_rx_mods):
-                    cx = (i - (num_rx_mods - 1)/2) * mod_w_rx
-                    cy = rx_y_pos
+                    center_x = start_x + i * rx_board_w_m
                     fig.add_shape(type="rect",
-                        x0=cx - mod_w_rx/2, y0=cy - mod_h_rx/2,
-                        x1=cx + mod_w_rx/2, y1=cy + mod_h_rx/2,
-                        line=dict(color="blue", width=2, dash="dash"),
-                        fillcolor="rgba(0,0,255,0.1)"
+                        x0=center_x - rx_board_w_m/2, y0=-rx_board_h_m/2,
+                        x1=center_x + rx_board_w_m/2, y1=rx_board_h_m/2,
+                        line=dict(color="LightBlue", width=2),
+                        fillcolor="rgba(173, 216, 230, 0.2)",
+                        name=f"RX Module {i+1}"
                     )
                 
-                # Add Dummy Scatter for Legend
-                fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='blue', dash='dash'), name='RX Module'))
+                # Antennas (Centered) inside the whole board array
+                rx_ant_width_m = (rx_total_elems - 1) * d_rx_m
+                rx_x = np.linspace(-rx_ant_width_m/2, rx_ant_width_m/2, rx_total_elems)
+                rx_y = np.zeros_like(rx_x)
                 
-                # TX Elements (Red, Y-axis, below RX)
-                # "RX array is above the TX"
-                # So TX starts below RX.
-                # TX Modules: likely Vertical. (150mm x 440mm) ?
-                # Or 440mm x 150mm rotated?
-                # Let's assume they form the vertical stem.
-                # Size per module
-                # TX: 3 * 9 * 4 = 108 elements.
-                # elements_per_tx_mod is set in logic block above
-
+                fig.add_trace(go.Scatter(x=rx_x, y=rx_y, mode='markers', marker=dict(color='blue', size=4), name='RX Elements'))
                 
-                # Vertical array: dim is determined by tx spacing.
-                # Height = 108 * d_tx
-                # Height = Fixed 440mm per module in Hardware mode
-                if design_mode == "Hardware (Fixed Elements)":
-                    mod_h_tx = 0.440 # 440 mm
-                else:
-                    mod_h_tx = elements_per_tx_mod * d_tx
-                mod_w_tx = 0.15 # Fixed width
-
-                # Gap below RX
+                # --- TX Array (Vertical) ---
+                # Board
+                tx_board_h_m = TX_MOD_LEN_MM / 1000.0 # Length is vertical dimension
+                tx_board_w_m = MOD_WIDTH_MM / 1000.0
+                
+                # Position: "Below RX".
                 gap = 0.05
-                tx_start_y = -mod_h_rx/2 - gap
+                # Center of TX Array (all modules)
+                # Total Height = Num_Mods * Mod_Len
+                total_tx_h = num_tx_mods * tx_board_h_m
                 
-                # TX Coords
-                tx_coords_y = (np.arange(tx_elements_total)) * d_tx
-                # make them go DOWN from tx_start_y
-                tx_coords_y = tx_start_y - tx_coords_y 
+                # Top of TX array starts at:
+                # RX_Bottom - Gap
+                rx_bottom = -rx_board_h_m/2
+                tx_top = rx_bottom - gap
                 
-                # Draw TX Module Outlines
-                # Stacked vertically downwards
-                # Center X = 0
+                # Center Y of the first module (closest to RX)
+                start_y = tx_top - tx_board_h_m/2
+                
                 for i in range(num_tx_mods):
-                    cx = 0
-                    # i=0 is top one.
-                    # Center Y = tx_start_y - (i * mod_h_tx) - mod_h_tx/2 ?
-                    # Depends on element coverage.
-                    # Let's center them on the element clusters if possible.
-                    # Simplest: Just stack them below each other.
-                    cy = tx_start_y - i * mod_h_tx - mod_h_tx/2
+                    # Going down
+                    center_y = start_y - i * tx_board_h_m
                     fig.add_shape(type="rect",
-                        x0=cx - mod_w_tx/2, y0=cy - mod_h_tx/2,
-                        x1=cx + mod_w_tx/2, y1=cy + mod_h_tx/2,
-                        line=dict(color="red", width=2, dash="dash"),
-                        fillcolor="rgba(255,0,0,0.1)"
+                        x0=-tx_board_w_m/2, y0=center_y - tx_board_h_m/2,
+                        x1=tx_board_w_m/2, y1=center_y + tx_board_h_m/2,
+                        line=dict(color="LightPink", width=2),
+                        fillcolor="rgba(255, 182, 193, 0.2)",
+                        name=f"TX Module {i+1}"
                     )
                 
-                # Add Dummy Scatter for Legend
-                fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='red', dash='dash'), name='TX Module'))
-
-                # Layout updates
-                # Determine range to show everything nicely
-                # Handle potential empty arrays if counts are 0 (unlikely with min=1)
-                all_x = rx_coords if len(rx_coords)>0 else [0]
-                if len(all_x) == 0: all_x = [0]
-                # Include module bounds in ranges
-                all_x = np.concatenate([all_x, [-mod_w_rx*num_rx_mods/2, mod_w_rx*num_rx_mods/2, -mod_w_tx/2, mod_w_tx/2]])
+                # Antennas
+                # Center of antenna array matches center of total TX board array? 
+                # Or just fill the space? 
+                # Let's align center of antennas with center of total TX boards.
+                array_center_y = tx_top - total_tx_h / 2.0
                 
-                all_y = np.concatenate([[rx_y_pos], tx_coords_y]) if len(tx_coords_y)>0 else [0]
-                # Include module bounds
-                # Lowest Y is approx tx_start_y - num_tx_mods * mod_h_tx
-                all_y = np.concatenate([all_y, [mod_h_rx/2, -mod_h_rx/2, tx_start_y, tx_start_y - num_tx_mods*mod_h_tx]])
+                tx_ant_height_m = (tx_total_elems - 1) * d_tx_m
+                tx_y = np.linspace(array_center_y + tx_ant_height_m/2, array_center_y - tx_ant_height_m/2, tx_total_elems)
+                tx_x = np.zeros_like(tx_y) 
                 
-                margin_x = (max(all_x) - min(all_x)) * 0.1 + 0.1
-                margin_y = (max(all_y) - min(all_y)) * 0.1 + 0.1
+                fig.add_trace(go.Scatter(x=tx_x, y=tx_y, mode='markers', marker=dict(color='red', size=4), name='TX Elements'))
                 
-                fig.update_layout(title=f"T-Shape Array Layout (RX={rx_elements_total}, TX={tx_elements_total})",
-                                  xaxis_title="X (m)", yaxis_title="Y (m)",
-                                  yaxis=dict(scaleanchor="x", scaleratio=1),
-                                  xaxis_range=[min(all_x)-margin_x, max(all_x)+margin_x],
-                                  yaxis_range=[min(all_y)-margin_y, max(all_y)+margin_y],
-                                  height=600,
-                                  showlegend=True)
+                # Update Layout with Auto-Scale (autorange=True is default if range not set, but we set scaleanchor)
+                # scaleanchor="x" keeps aspect ratio 1:1. 
+                # To auto-scale while keeping aspect ratio, just don't hardcode ranges.
+                fig.update_layout(title="Array Geometry", xaxis_title="X (m)", yaxis_title="Y (m)",
+                                  yaxis=dict(scaleanchor="x", scaleratio=1), height=600,
+                                  xaxis=dict(autorange=True)) # Ensure auto range
                 st.plotly_chart(fig, use_container_width=True)
-                
-            else: # Beam Pattern
-                st.markdown(f"#### {sim_mode}")
-                
-                # --- Dual View Layout ---
-                # We want Math on top or side? 
-                # Let's put Math in an expander to save space for the rich plots
-                
+
+            else: # Beam Pattern Mode
+                # Identify Configuration
                 is_azimuth = "Azimuth" in sim_mode
-                N = rx_elements_total if is_azimuth else tx_elements_total
-                d = d_rx if is_azimuth else d_tx
-                theta_gr = theta_gr_rx if is_azimuth else theta_gr_tx
-
-                with st.expander("Math & Formulas", expanded=False):
-                    st.markdown("**Array Factor (AF):**")
-                    st.latex(r"AF(\theta) = \left| \sum_{n=0}^{N-1} w_n \cdot e^{j \frac{2\pi}{\lambda} n d \sin(\theta)} \right|")
-                    st.markdown(f"**N**: {N} elements")
-                    st.markdown(f"**d**: {d*1000:.2f} mm")
-                    
-                    st.markdown("**Windowing Function ($w_n$):**")
-                    if "Hamming" in window_type:
-                        st.latex(r"w_n = 0.54 - 0.46 \cos\left(\frac{2\pi n}{N-1}\right)")
-                    elif "Hanning" in window_type:
-                        st.latex(r"w_n = 0.5 \left(1 - \cos\left(\frac{2\pi n}{N-1}\right)\right)")
-                    elif "Blackman" in window_type:
-                        st.latex(r"w_n = 0.42 - 0.5 \cos\left(\frac{2\pi n}{N-1}\right) + 0.08 \cos\left(\frac{4\pi n}{N-1}\right)")
-                    else:
-                        st.latex(r"w_n = 1 \quad \text{(Rectangular)}")
                 
-                # --- Calculation ---
-                # 1. Weights for "Real" (Windowed) Pattern
-                if "Hamming" in window_type:
-                    weights_real = np.hamming(N)
-                elif "Hanning" in window_type:
-                    weights_real = np.hanning(N)
-                elif "Blackman" in window_type:
-                    weights_real = np.blackman(N)
-                else:
-                    weights_real = np.ones(N)
-
-                # 2. Weights for "Theoretical" (Virtual High-Density Array)
-                # Goal: Match Aperture Length L but use N=1000 to kill Grating Lobes.
+                N = rx_total_elems if is_azimuth else tx_total_elems
+                d = d_rx_m if is_azimuth else d_tx_m
+                
+                # 1. Real Solver
+                res_real = solve_array_factor(N, d, window_type, theta_scan, sim_res)
+                
+                # 2. Theoretical Solver (Virtual Array)
+                # N=1000, Same Length L
                 L_real = (N - 1) * d
-                if L_real <= 0: L_real = 0.001 # Safety
-
-                N_virtual = 1000
-                d_virtual = L_real / (N_virtual - 1) if N_virtual > 1 else L_real
-
-                if "Hamming" in window_type:
-                    weights_theory = np.hamming(N_virtual)
-                elif "Hanning" in window_type:
-                    weights_theory = np.hanning(N_virtual)
-                elif "Blackman" in window_type:
-                    weights_theory = np.blackman(N_virtual)
+                N_theory = 1000
+                d_theory = L_real / (N_theory - 1) if N_theory > 1 else L_real
+                
+                res_theory = solve_array_factor(N_theory, d_theory, window_type, theta_scan, sim_res)
+                
+                # 3. Grating Lobe Check
+                gl_angles = []
+                if d > 0:
+                    sin_scan = np.sin(np.radians(theta_scan))
+                    for m in [-3, -2, -1, 1, 2, 3]:
+                        arg = sin_scan + m * (wavelength / d)
+                        if abs(arg) <= 1.0:
+                            ang = np.degrees(np.arcsin(arg))
+                            gl_angles.append(ang)
+                            
+                # Theoretical Resolution (Rayleigh)
+                # Res = degrees(asin(lambda / L))
+                L_current = (N - 1) * d 
+                if L_current > 0:
+                    try:
+                        res_theo_deg = np.degrees(np.arcsin(wavelength / L_current))
+                    except:
+                        res_theo_deg = 0 # If lambda > L, usually not good
                 else:
-                    weights_theory = np.ones(N_virtual)
-                    
-                # Theta Array with user resolution
-                # theta_deg = np.linspace(-90, 90, 1000) # Old
-                theta_deg = np.arange(-90, 90 + sim_res/2, sim_res)
-                theta_rad = np.deg2rad(theta_deg)
+                    res_theo_deg = 0
+                            
+                # --- Dual View Visualization ---
+                st.subheader(f"{sim_mode} Analysis")
                 
-                k = 2 * np.pi / wavelength
+                c_vis1, c_vis2 = st.columns([1, 1])
                 
-                # Vectorized AF Calculation Helper
-                def compute_af_db(w, th_rad, n_elems, spacing):
-                    # phases = k * d * n * sin(theta)
-                    n_idx = np.arange(n_elems)
-                    u = np.sin(th_rad)
-                    phases = k * spacing * n_idx[:, np.newaxis] * u[np.newaxis, :]
-                    
-                    # Sum
-                    af_c = np.abs(np.sum(w[:, np.newaxis] * np.exp(1j * phases), axis=0))
-                    
-                    # Normalize
-                    af_max_val = np.max(af_c)
-                    if af_max_val > 0:
-                        af_n = af_c / af_max_val
-                        return 20 * np.log10(af_n + 1e-12)
-                    else:
-                        return np.zeros_like(af_c) - 60
-
-                af_db_real = compute_af_db(weights_real, theta_rad, N, d)
-                af_db_theory = compute_af_db(weights_theory, theta_rad, N_virtual, d_virtual)
-                
-                # --- Visualization (Dual View) ---
-                col_polar, col_rect = st.columns(2)
-                
-                # 1. Polar Plot (Radar View)
-                # Helper for Polar DB: Shift so -60 is center (0) and 0 is edge (60)
-                def to_polar_db(db_vals, min_db=-60):
-                    return np.maximum(db_vals, min_db) - min_db
-
-                with col_polar:
-                    fig_polar = go.Figure()
-                    
-                    # Theory (Gray Dashed)
-                    fig_polar.add_trace(go.Scatterpolar(
-                        r=to_polar_db(af_db_theory), 
-                        theta=theta_deg,
-                        mode='lines',
-                        line=dict(color='gray', dash='dash', width=1),
-                        name='Theoretical'
-                    ))
-                    
-                    # Real (Blue Filled)
-                    fig_polar.add_trace(go.Scatterpolar(
-                        r=to_polar_db(af_db_real),
-                        theta=theta_deg,
-                        mode='lines', 
-                        fill='toself',
-                        line=dict(color='blue', width=2),
-                        name='Real Pattern'
-                    ))
-                    
-                    # Grating Lobes
-                    if theta_gr is not None:
-                         # Radial lines at theta_gr
-                         # r goes from 0 to 60 (representing -60 to 0)
-                         fig_polar.add_trace(go.Scatterpolar(
-                             r=[0, 60], theta=[theta_gr, theta_gr],
-                             mode='lines', line=dict(color='red', dash='dash', width=2),
-                             name='Grating Lobe'
-                         ))
-                         fig_polar.add_trace(go.Scatterpolar(
-                             r=[0, 60], theta=[-theta_gr, -theta_gr],
-                             mode='lines', line=dict(color='red', dash='dash', width=2),
-                             showlegend=False
-                         ))
-
-                    fig_polar.update_layout(
-                        title="Polar View",
-                        polar=dict(
-                            radialaxis=dict(
-                                visible=True, 
-                                range=[0, 60],
-                                tickmode='array',
-                                tickvals=[0, 15, 30, 45, 60],
-                                ticktext=['-60dB', '-45dB', '-30dB', '-15dB', '0dB']
-                            ),
-                            angularaxis=dict(direction="clockwise", rotation=90)
-                        ),
-                        height=500,
-                        margin=dict(l=30, r=30, t=30, b=30),
-                        showlegend=True,
-                        legend=dict(x=0.5, y=-0.15, xanchor='center', orientation='h')
-                    )
-                    st.plotly_chart(fig_polar, use_container_width=True)
-
-                # 2. Rectangular Plot (Engineering View)
-                with col_rect:
-                    fig_rect = go.Figure()
-                    
-                    # Theory
-                    fig_rect.add_trace(go.Scatter(
-                        x=theta_deg, y=af_db_theory,
-                        mode='lines',
-                        line=dict(color='gray', dash='dash'),
-                        name='Theoretical'
-                    ))
+                # Polar Plot (Radar View)
+                with c_vis1:
+                    fig_pol = go.Figure()
                     
                     # Real
-                    fig_rect.add_trace(go.Scatter(
-                        x=theta_deg, y=af_db_real,
+                    def db_to_r(db):
+                        return np.maximum(db, -60) + 60
+
+                    fig_pol.add_trace(go.Scatterpolar(
+                        r=db_to_r(res_real["af_db"]),
+                        theta=res_real["theta"],
                         mode='lines',
-                        line=dict(color='blue'),
-                        name='Real Pattern'
+                        fill='toself',
+                        line=dict(color='blue', width=2),
+                        name='Real',
+                        customdata=res_real["af_db"],
+                        hovertemplate='Angle: %{theta:.1f}°<br>Ampl: %{customdata:.1f} dB<extra></extra>'
+                    ))
+                    
+                    # Theory
+                    fig_pol.add_trace(go.Scatterpolar(
+                        r=db_to_r(res_theory["af_db"]),
+                        theta=res_theory["theta"],
+                        mode='lines',
+                        line=dict(color='gray', dash='dash', width=1),
+                        name='Theoretical',
+                        customdata=res_theory["af_db"],
+                        hovertemplate='Angle: %{theta:.1f}°<br>Ampl: %{customdata:.1f} dB<extra></extra>'
                     ))
                     
                     # Grating Lobes
-                    if theta_gr is not None:
-                        fig_rect.add_vline(x=theta_gr, line_dash="dash", line_color="red", annotation_text="GL")
-                        fig_rect.add_vline(x=-theta_gr, line_dash="dash", line_color="red", annotation_text="GL")
+                    for gl in gl_angles:
+                        fig_pol.add_trace(go.Scatterpolar(
+                            r=[0, 60], theta=[gl, gl],
+                            mode='lines',
+                            line=dict(color='red', width=2),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                        
+                    fig_pol.update_layout(
+                        title="Polar View (Radar)",
+                        polar=dict(
+                            # sector=[270, 90],  <-- REMOVED. Standard 0-360 view handles -90 to 90 better (maps to 270-90)
+                            radialaxis=dict(visible=True), # Auto-range
+                            angularaxis=dict(rotation=90, direction="clockwise")
+                        ),
+                        margin=dict(l=20, r=20, t=30, b=20),
+                        height=400,
+                        showlegend=True,
+                        hovermode='closest'
+                    )
+                    st.plotly_chart(fig_pol, use_container_width=True, config={'displayModeBar': True, 'staticPlot': False})
 
+                # Cartesian Plot (Engineering View)
+                with c_vis2:
+                    fig_rect = go.Figure()
+                    
+                    fig_rect.add_trace(go.Scatter(
+                        x=res_theory["theta"], y=res_theory["af_db"],
+                        mode='lines',
+                        line=dict(color='gray', dash='dash'),
+                        name='Theoretical',
+                        hovertemplate='Angle: %{x:.1f}°<br>Ampl: %{y:.1f} dB<extra></extra>'
+                    ))
+                    
+                    fig_rect.add_trace(go.Scatter(
+                        x=res_real["theta"], y=res_real["af_db"],
+                        mode='lines',
+                        line=dict(color='blue'),
+                        name='Real',
+                        hovertemplate='Angle: %{x:.1f}°<br>Ampl: %{y:.1f} dB<extra></extra>'
+                    ))
+                    
+                    for gl in gl_angles:
+                        fig_rect.add_vline(x=gl, line_color="red", line_width=1, annotation_text="GL")
+                        
                     fig_rect.update_layout(
-                        title="Rectangular View (Engineering)",
+                        title="Cartesian View (Engineering)",
                         xaxis_title="Angle (deg)",
                         yaxis_title="Amplitude (dB)",
-                        xaxis=dict(range=[-90, 90], dtick=30),
-                        yaxis=dict(range=[-60, 0]),
-                        height=500,
-                        margin=dict(l=30, r=30, t=30, b=30),
-                        showlegend=True,
-                        legend=dict(x=0.5, y=-0.15, xanchor='center', orientation='h'),
-                        hovermode="x unified"
+                        xaxis=dict(range=[-90, 90], dtick=15),
+                        yaxis=dict(autorange=True), # Auto-scale Y
+                        margin=dict(l=20, r=20, t=30, b=20),
+                        height=400
                     )
                     st.plotly_chart(fig_rect, use_container_width=True)
 
-            # E. GUI Outputs
-            st.markdown("---")
-            m1, m2 = st.columns(2)
-            
-            # Theoretical Resolution (lambda / L)
-            L_az = (rx_elements_total - 1) * d_rx
-            L_el = (tx_elements_total - 1) * d_tx
-            
-            res_az_deg = np.degrees(wavelength / L_az) if L_az > 0 else 0
-            res_el_deg = np.degrees(wavelength / L_el) if L_el > 0 else 0
-            
-            # Windowed broadening factor
-            w_factor = 1.0
-            if "Hamming" in window_type: w_factor = 1.3
-            elif "Hanning" in window_type: w_factor = 1.44
-            elif "Blackman" in window_type: w_factor = 1.6
-            
-            m1.metric("Azimuth Resolution (Theoretical)", f"{res_az_deg:.2f}°", help="lambda / D_rx")
-            m1.markdown(r"$\text{Res}_{AZ} = \frac{\lambda}{D_{RX}}$")
-            m1.write(f"Windowed: **{res_az_deg * w_factor:.2f} °**")
-            
-            m2.metric("Elevation Resolution (Theoretical)", f"{res_el_deg:.2f}°", help="lambda / D_tx")
-            m2.markdown(r"$\text{Res}_{EL} = \frac{\lambda}{D_{TX}}$")
-            m2.write(f"Windowed: **{res_el_deg * w_factor:.2f} °**")
-            
-            # Warnings
-            if gl_issues:
-                for issue in gl_issues:
-                    st.warning(issue)
+                # --- Metrics & Warnings ---
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Resolution (Solved by $\sqrt{2} \cdot AF$)", f"{res_real['resolution']:.3f}°", help="From numeric solver")
+                
+                m2.metric("Theoretical Resolution (λ/L)", f"{res_theo_deg:.3f}°", help="Rayleigh Criterion: degrees(asin(λ/L))")
+                # Removed Peak Gain metric as requested
+                
+                if gl_angles:
+                    m3.error(f"Warning: {len(gl_angles)} Grating Lobes Detected!")
+                    st.warning(f"Grating Lobes found at: {[f'{a:.1f}°' for a in gl_angles]} inside visible field.")
+
+                # --- Methodology & Formulas ---
+                with st.expander("Methodology & Formulas"):
+                    st.markdown("#### Methodology")
+                    st.markdown("""
+                    **Resolution Calculation:**  
+                    The resolution is not independent. It is obtained from the solution of the equation:
+                    """)
+                    st.latex(r"\sqrt{2} \cdot AF(Res) = AF(\theta_{scan})")
+                    st.markdown(r"""
+                    Where $Res$ represents the angle at which the Amplitude Factor ($AF$) drops to $1/\sqrt{2}$ (approx 0.707) of the peak amplitude at the scan angle.
+                    """)
+                    
+                    st.markdown("#### Physics Formulas")
+                    st.markdown("**1. Steered Array Factor**")
+                    st.latex(r"AF(\theta) = \left| \sum_{n=0}^{N-1} w_n \cdot e^{j \frac{2\pi}{\lambda} n d (\sin(\theta) - \sin(\theta_{scan}))} \right|")
+                    
+                    st.markdown("**2. Grating Lobe Condition**")
+                    st.latex(r"\sin(\theta_{gr}) = \sin(\theta_{scan}) \pm m \frac{\lambda}{d}, \quad m=1,2,...")
+                    
+                    st.markdown(f"**3. Selected Windowing: {window_type}**")
+                    if window_type == "Hamming":
+                        st.latex(r"w_n = 0.54 - 0.46 \cos\left(\frac{2\pi n}{N-1}\right)")
+                    elif window_type == "Blackman":
+                        st.latex(r"w_n = 0.42 - 0.5 \cos\left(\frac{2\pi n}{N-1}\right) + 0.08 \cos\left(\frac{4\pi n}{N-1}\right)")
+                    else:
+                        st.write("Uniform / Rectangular ($w_n = 1$)")
 
     elif radar_tool == "Monostatic Power Budget Calculator":
         st.subheader("Monostatic Power Budget Calculator")
