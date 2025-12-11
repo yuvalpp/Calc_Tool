@@ -145,7 +145,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.05"
+APP_VERSION = "Rev 3.07"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -854,7 +854,23 @@ elif selected_tool == "RADAR Calculator":
                 # 3. Beam Control
                 c_beam1, c_beam2 = st.columns([2, 1])
                 with c_beam1:
-                    theta_scan = st.slider("Steering Angle (deg)", -60.0, 60.0, 0.0, step=1.0)
+                    # Sync Logic for Steering
+                    if 'steer_angle' not in st.session_state: st.session_state.steer_angle = 0.0
+                    
+                    def update_steer_slider():
+                        st.session_state.steer_angle = st.session_state.steer_slider
+                    def update_steer_input():
+                        st.session_state.steer_angle = st.session_state.steer_input
+
+                    # Sub-columns for Slider and Manual Input
+                    c_slide, c_man = st.columns([2, 1])
+                    with c_slide:
+                        st.slider("Steering", -60.0, 60.0, st.session_state.steer_angle, step=1.0, key='steer_slider', on_change=update_steer_slider, label_visibility="collapsed")
+                    with c_man:
+                        st.number_input("Deg", value=st.session_state.steer_angle, step=1.0, format="%.1f", key='steer_input', on_change=update_steer_input, label_visibility="collapsed")
+                        
+                    theta_scan = st.session_state.steer_angle # Use the synced value
+
                 with c_beam2:
                     window_type = st.selectbox("Windowing", ["None", "Hamming", "Hanning", "Blackman"])
 
@@ -891,8 +907,8 @@ elif selected_tool == "RADAR Calculator":
                 n_idx = np.arange(n_elems)
                 
                 # Vectorized
-                # u = sin(Theta) - sin(Theta_scan)
-                u = np.sin(theta_rad) - np.sin(theta_scan_rad)
+                # u = sin(Theta - Theta_scan)
+                u = np.sin(theta_rad - theta_scan_rad)
                 
                 # phases [N, Theta] = k * d * n * u
                 # To broadcast: n_idx[:, None] * u[None, :]
@@ -1094,12 +1110,26 @@ elif selected_tool == "RADAR Calculator":
                 # 3. Grating Lobe Check
                 gl_angles = []
                 if d > 0:
-                    sin_scan = np.sin(np.radians(theta_scan))
-                    for m in [-3, -2, -1, 1, 2, 3]:
-                        arg = sin_scan + m * (wavelength / d)
-                        if abs(arg) <= 1.0:
-                            ang = np.degrees(np.arcsin(arg))
-                            gl_angles.append(ang)
+                    # New Logic: Theta_GL = Theta_Scan +/- asin(m * lambda / d)
+                    ratio = wavelength / d
+                    # Check for valid m
+                    max_m = int(np.floor(1.0 / ratio)) if ratio > 0 else 0
+                    
+                    for m in range(1, max_m + 2): # Check a bit beyond to be safe, filter later
+                        # m * lambda / d
+                        val = m * ratio
+                        if abs(val) <= 1.0:
+                            offset = np.degrees(np.arcsin(val))
+                            
+                            # Positive side
+                            gl1 = theta_scan + offset
+                            if -90 <= gl1 <= 90:
+                                gl_angles.append(gl1)
+                                
+                            # Negative side
+                            gl2 = theta_scan - offset
+                            if -90 <= gl2 <= 90:
+                                gl_angles.append(gl2)
                             
                 # Theoretical Resolution (Rayleigh)
                 # Res = degrees(asin(lambda / L))
@@ -1230,10 +1260,10 @@ elif selected_tool == "RADAR Calculator":
                     
                     st.markdown("#### Physics Formulas")
                     st.markdown("**1. Steered Array Factor**")
-                    st.latex(r"AF(\theta) = \left| \sum_{n=0}^{N-1} w_n \cdot e^{j \frac{2\pi}{\lambda} n d (\sin(\theta) - \sin(\theta_{scan}))} \right|")
+                    st.latex(r"AF(\theta) = \left| \sum_{n=0}^{N-1} w_n \cdot e^{j \frac{2\pi}{\lambda} n d \cdot \sin(\theta - \theta_{scan})} \right|")
                     
                     st.markdown("**2. Grating Lobe Condition**")
-                    st.latex(r"\sin(\theta_{gr}) = \sin(\theta_{scan}) \pm m \frac{\lambda}{d}, \quad m=1,2,...")
+                    st.latex(r"\theta_{gr} = \theta_{scan} \pm \arcsin\left( m \frac{\lambda}{d} \right), \quad m=1,2,...")
                     
                     st.markdown(f"**3. Selected Windowing: {window_type}**")
                     if window_type == "Hamming":
