@@ -145,7 +145,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.07"
+APP_VERSION = "Rev 3.09"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -786,60 +786,87 @@ elif selected_tool == "RADAR Calculator":
         st.subheader("T-Shape Array Visualizer")
         
         # --- Password Protection ---
-        password = st.text_input("Enter Password to Access Tool", type="password")
+        if 'authenticated' not in st.session_state:
+            st.session_state.authenticated = False
+            
+        login_placeholder = st.empty()
         
-        if password != "Gideon#1":
-            st.warning("Access Denied. Please enter the correct password.")
+        if not st.session_state.authenticated:
+            with login_placeholder.container():
+                 password = st.text_input("Enter Password to Access Tool", type="password")
+                 if password == "Gideon#1":
+                     st.session_state.authenticated = True
+                     st.rerun()
+                 elif password:
+                     st.warning("Access Denied. Please enter the correct password.")
+                     
+                     # --- Access Request Form ---
+                     with st.expander("Don't have a password? Request Access"):
+                        st.write("Please fill out the form below to request access via email.")
+                        req_name = st.text_input("Name")
+                        req_org = st.text_input("Organization / Reason")
+                        
+                        if req_name:
+                            subject = "Request Access: T-Shape Visualizer"
+                            body = f"Hi Yuval,\n\nI would like to request access to the T-Shape Visualizer.\n\nName: {req_name}\nOrganization: {req_org}\n\nThank you."
+                            
+                            safe_subject = urllib.parse.quote(subject)
+                            safe_body = urllib.parse.quote(body)
+                            mailto_link = f"mailto:uv.peleg@gmail.com?subject={safe_subject}&body={safe_body}"
+                            
+                            st.markdown(f"[**Click here to send email request**]({mailto_link})", unsafe_allow_html=True)
 
-            # --- Access Request Form ---
-            with st.expander("Don't have a password? Request Access"):
-                st.write("Please fill out the form below to request access via email.")
-                req_name = st.text_input("Name")
-                req_org = st.text_input("Organization / Reason")
-                
-                if req_name:
-                    subject = "Request Access: T-Shape Visualizer"
-                    body = f"Hi Yuval,\n\nI would like to request access to the T-Shape Visualizer.\n\nName: {req_name}\nOrganization: {req_org}\n\nThank you."
-                    
-                    safe_subject = urllib.parse.quote(subject)
-                    safe_body = urllib.parse.quote(body)
-                    mailto_link = f"mailto:uv.peleg@gmail.com?subject={safe_subject}&body={safe_body}"
-                    
-                    st.markdown(f"[**Click here to send email request**]({mailto_link})", unsafe_allow_html=True)
+        if st.session_state.authenticated:
+            # Login Success - Clear the login screen if it was there
+            login_placeholder.empty()
 
-        else:
             st.success("Access Granted.")
             
             # --- Main Interface ---
-            # A. Sidebar Inputs (Moved to Main for this tool due to complexity)
-            # Actually user asked for "Sidebar Inputs" but Streamlit Sidebar is global. 
-            # Prompt says "A. Sidebar Inputs". I'll put them in an expander or Sidebar?
-            # "Sidebar Inputs: ...". Usually means st.sidebar.
-            # But since it's a tab, putting tool-specific controls in sidebar is tricky if user switches tabs.
-            # Best practice in Streamlit "Tools" approach is to check `if selected_tool == ...` inside sidebar.
-            # Or just put them in the main area col1. 
-            # Given the "Sidebar Inputs" title, I'll put them in a dedicated left column or expander that ACTS like a sidebar for this tool.
-            # Let's use an Expander "Configuration" as before, but detailed.
             
             st.info("""
-            **T-Shape Array Visualizer (Major Update)**
-            Simulates beam patterns with Steering, Windowing, and Dual-View visualization.
+            **T-Shape Array Visualizer**
+            Simulates beam patterns for T-Shape MIMO arrays.
             """)
             
-            with st.expander("Configuration / Sidebar", expanded=True):
-                # 1. General Config
-                c_gen1, c_gen2, c_gen3 = st.columns(3)
-                with c_gen1:
-                    ts_freq = st.number_input("Frequency (GHz)", value=77.0, step=0.1, format="%.2f")
-                with c_gen2:
-                    sim_res = st.number_input("Resolution (deg)", value=0.01, min_value=0.01, max_value=1.0, step=0.01, format="%.3f", help="Simulation angular step")
-                with c_gen3:
-                     # Calculate Lambda for reference
-                    wavelength_mm = 300.0 / ts_freq if ts_freq > 0 else 0
-                    st.write(f"$\\lambda$: **{wavelength_mm:.2f} mm**")
+            # --- Layout Reorganization ---
+            
+            # 1. Beam Control (Top - Most Used)
+            st.markdown("### Beam Control")
+            st.caption("Control the Beam Direction using the slider.")
+            
+            c_beam1, c_beam2 = st.columns([2, 1])
+            with c_beam1:
+                # Sync Logic for Steering
+                if 'steer_angle' not in st.session_state: st.session_state.steer_angle = 0.0
+                
+                def update_from_slider():
+                    st.session_state.steer_angle = st.session_state.steer_slider
 
-                st.markdown("---")
-                # 2. Structure Config
+                # Slider linked to 'steer_slider', syncs with session_state.steer_angle
+                st.slider("Steering Angle (deg)", -60.0, 60.0, float(st.session_state.steer_angle), step=1.0, key='steer_slider', on_change=update_from_slider)
+                    
+                theta_scan = st.session_state.steer_angle # Use the synced value
+
+            with c_beam2:
+                # Sim Mode Selection here? Or keep it separate?
+                # User asked for "Beam Control" to be top. 
+                pass
+
+            # 2. Simulation Settings (Visible)
+            st.markdown("### Simulation Settings")
+            c_sim1, c_sim2, c_sim3 = st.columns(3)
+            with c_sim1:
+                window_type = st.selectbox("Windowing", ["None", "Hamming", "Hanning", "Blackman"])
+            with c_sim2:
+                sim_res = st.number_input("Resolution (deg)", value=0.01, min_value=0.01, max_value=1.0, step=0.01, format="%.3f", help="Simulation angular step")
+            with c_sim3:
+                sim_mode = st.radio("View Mode", ["Physical Geometry", "Beam Pattern (Azimuth)", "Beam Pattern (Elevation)"], horizontal=True)
+
+            # 3. Array Configuration (Hidden by default)
+            with st.expander("Hardware Setup (Array Configuration)", expanded=False):
+                st.markdown("#### Hardware Parameters")
+                # Structure Config
                 c_struct1, c_struct2, c_struct3, c_struct4 = st.columns(4)
                 with c_struct1:
                     num_rx_mods = st.number_input("RX Modules", value=3, min_value=1, step=1)
@@ -850,33 +877,10 @@ elif selected_tool == "RADAR Calculator":
                 with c_struct4:
                     tx_spacing_mm = st.number_input("TX Spacing (mm)", value=4.074, step=0.001, format="%.3f")
                 
-                st.markdown("---")
-                # 3. Beam Control
-                c_beam1, c_beam2 = st.columns([2, 1])
-                with c_beam1:
-                    # Sync Logic for Steering
-                    if 'steer_angle' not in st.session_state: st.session_state.steer_angle = 0.0
-                    
-                    def update_steer_slider():
-                        st.session_state.steer_angle = st.session_state.steer_slider
-                    def update_steer_input():
-                        st.session_state.steer_angle = st.session_state.steer_input
-
-                    # Sub-columns for Slider and Manual Input
-                    c_slide, c_man = st.columns([2, 1])
-                    with c_slide:
-                        st.slider("Steering", -60.0, 60.0, st.session_state.steer_angle, step=1.0, key='steer_slider', on_change=update_steer_slider, label_visibility="collapsed")
-                    with c_man:
-                        st.number_input("Deg", value=st.session_state.steer_angle, step=1.0, format="%.1f", key='steer_input', on_change=update_steer_input, label_visibility="collapsed")
-                        
-                    theta_scan = st.session_state.steer_angle # Use the synced value
-
-                with c_beam2:
-                    window_type = st.selectbox("Windowing", ["None", "Hamming", "Hanning", "Blackman"])
-
-                st.markdown("---")
-                # 4. Mode
-                sim_mode = st.radio("Mode", ["Physical Geometry", "Beam Pattern (Azimuth)", "Beam Pattern (Elevation)"], horizontal=True)
+                st.markdown("#### General")
+                ts_freq = st.number_input("Frequency (GHz)", value=77.0, step=0.1, format="%.2f")
+                wavelength_mm = 300.0 / ts_freq if ts_freq > 0 else 0
+                st.write(f"$\\lambda$: **{wavelength_mm:.2f} mm**")
 
             # --- Physics Engine ---
             # Constants
@@ -907,8 +911,8 @@ elif selected_tool == "RADAR Calculator":
                 n_idx = np.arange(n_elems)
                 
                 # Vectorized
-                # u = sin(Theta - Theta_scan)
-                u = np.sin(theta_rad - theta_scan_rad)
+                # u = sin(Theta) - sin(Theta_scan)
+                u = np.sin(theta_rad) - np.sin(theta_scan_rad)
                 
                 # phases [N, Theta] = k * d * n * u
                 # To broadcast: n_idx[:, None] * u[None, :]
@@ -1118,18 +1122,33 @@ elif selected_tool == "RADAR Calculator":
                     for m in range(1, max_m + 2): # Check a bit beyond to be safe, filter later
                         # m * lambda / d
                         val = m * ratio
-                        if abs(val) <= 1.0:
-                            offset = np.degrees(np.arcsin(val))
-                            
-                            # Positive side
-                            gl1 = theta_scan + offset
+                        
+                        # New Logic for sin(theta) - sin(theta_scan)
+                        # sin(theta_gl) - sin(theta_scan) = +/- m * lambda / d
+                        # sin(theta_gl) = sin(theta_scan) +/- m * lambda / d
+                        
+                        sin_scan = np.sin(np.radians(theta_scan))
+                        
+                        # Positive m
+                        arg1 = sin_scan + val
+                        if abs(arg1) <= 1.0:
+                            gl1 = np.degrees(np.arcsin(arg1))
                             if -90 <= gl1 <= 90:
                                 gl_angles.append(gl1)
-                                
-                            # Negative side
-                            gl2 = theta_scan - offset
+
+                        # Negative m (effectively subtraction from scan)
+                        arg2 = sin_scan - val
+                        if abs(arg2) <= 1.0:
+                            gl2 = np.degrees(np.arcsin(arg2))
                             if -90 <= gl2 <= 90:
                                 gl_angles.append(gl2)
+                        
+                        # Note: Previous logic was theta = scan +/- asin(...). 
+                        # New logic is sin(theta) = sin(scan) +/- ...
+                        # This matches the core AF change.
+                        
+                        # Keeping the loop structure but replacing the inside logic.
+                        # We don't need 'offset = arcsin(val)' anymore directly.
                             
                 # Theoretical Resolution (Rayleigh)
                 # Res = degrees(asin(lambda / L))
@@ -1260,7 +1279,7 @@ elif selected_tool == "RADAR Calculator":
                     
                     st.markdown("#### Physics Formulas")
                     st.markdown("**1. Steered Array Factor**")
-                    st.latex(r"AF(\theta) = \left| \sum_{n=0}^{N-1} w_n \cdot e^{j \frac{2\pi}{\lambda} n d \cdot \sin(\theta - \theta_{scan})} \right|")
+                    st.latex(r"AF(\theta) = \left| \sum_{n=0}^{N-1} w_n \cdot e^{j \frac{2\pi}{\lambda} n d (\sin(\theta) - \sin(\theta_{scan}))} \right|")
                     
                     st.markdown("**2. Grating Lobe Condition**")
                     st.latex(r"\theta_{gr} = \theta_{scan} \pm \arcsin\left( m \frac{\lambda}{d} \right), \quad m=1,2,...")
