@@ -35,30 +35,31 @@ E96 = [
 SERIES_DICT = {"E24": E24, "E48": E48, "E96": E96}
 
 # --- Helper Functions ---
-def format_eng(value):
-    """Formats a number in engineering notation (m, k, M, G)."""
+def format_engineering(value, unit=""):
+    """Formats a number with SI prefixes."""
     if value == 0:
-        return "0"
-    
-    abs_val = abs(value)
-    if abs_val < 1e-9: # Too small, just return as is or 0
-        return f"{value:.4g}"
+        return f"0.00 {unit}"
         
-    exp = math.floor(math.log10(abs_val))
-    eng_exp = exp - (exp % 3)
+    abs_val = abs(value)
+    sign = "-" if value < 0 else ""
     
-    # Clamp to supported range if needed
-    suffixes = {
-        -12: "p", -9: "n", -6: "u", -3: "m", 
-        0: "", 
-        3: "k", 6: "M", 9: "G", 12: "T"
-    }
-    
-    if eng_exp in suffixes:
-        mantissa = value / (10 ** eng_exp)
-        return f"{mantissa:.4g}{suffixes[eng_exp]}"
+    # Prefixes
+    if abs_val >= 1e9:
+        return f"{sign}{abs_val/1e9:.2f} G{unit}"
+    elif abs_val >= 1e6:
+        return f"{sign}{abs_val/1e6:.2f} M{unit}"
+    elif abs_val >= 1e3:
+        return f"{sign}{abs_val/1e3:.2f} k{unit}"
+    elif abs_val >= 1e-3:
+        return f"{sign}{abs_val:.2f} {unit}"
+    elif abs_val >= 1e-6:
+        return f"{sign}{abs_val*1e6:.2f} µ{unit}"
     else:
-        return f"{value:.4e}"
+        return f"{sign}{abs_val*1e9:.2f} n{unit}"
+
+def format_eng(value):
+     # Keep old for backward compatibility if needed, or redirect
+    return format_engineering(value, "")
 
 def find_nearest_e_series(value, series_name):
     if value <= 0:
@@ -145,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.09"
+APP_VERSION = "Rev 3.14"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -153,6 +154,109 @@ def calculate_near_field(d_aperture, wavelength):
     # Fraunhofer distance: 2 * D^2 / lambda
     r_ff = (2 * (d_aperture ** 2)) / wavelength
     return r_ff
+
+# --- 3D Render Helper ---
+def render_3d_shape(shape_type):
+    fig = go.Figure()
+    
+    # Common layout settings for "CAD" look
+    layout_settings = dict(
+        scene=dict(
+            xaxis=dict(visible=False, showbackground=False),
+            yaxis=dict(visible=False, showbackground=False),
+            zaxis=dict(visible=False, showbackground=False),
+            aspectmode='data'
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=300,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
+    )
+
+    if shape_type == "Metal Sphere":
+        # Parametric Sphere
+        theta = np.linspace(0, 2*np.pi, 30)
+        phi = np.linspace(0, np.pi, 30)
+        theta, phi = np.meshgrid(theta, phi)
+        r = 1
+        x = r * np.sin(phi) * np.cos(theta)
+        y = r * np.sin(phi) * np.sin(theta)
+        z = r * np.cos(phi)
+        
+        fig.add_trace(go.Surface(x=x, y=y, z=z, colorscale='Blues', opacity=0.6, showscale=False))
+        fig.add_trace(go.Scatter3d(x=[0, 1.2], y=[0,0], z=[0,0], mode='lines+text', text=["", "r"], line=dict(color='white', width=4)))
+
+    elif shape_type == "Flat Metal Plate (Normal Incidence)":
+        # Rectangular Plane
+        x = [-1, 1, 1, -1, -1]
+        y = [0, 0, 0, 0, 0] # Flat in XZ mostly, but let's do XY plane facing Z
+        # Plate facing "Normal Incidence" usually means facing the radar. 
+        # Let's put plate in XY plane.
+        x = np.array([-1, 1, 1, -1])
+        y = np.array([-1, -1, 1, 1])
+        z = np.array([0, 0, 0, 0])
+        
+        fig.add_trace(go.Mesh3d(x=x, y=y, z=z, color='cyan', opacity=0.5, flatshading=True))
+        # Wireframe border
+        fig.add_trace(go.Scatter3d(x=[-1, 1, 1, -1, -1], y=[-1, -1, 1, 1, -1], z=[0,0,0,0,0], mode='lines', line=dict(color='white', width=4)))
+
+    elif shape_type == "Cylinder (Normal to Axis)":
+        # Parametric Cylinder
+        z = np.linspace(-1, 1, 30)
+        theta = np.linspace(0, 2*np.pi, 30)
+        z_grid, theta_grid = np.meshgrid(z, theta)
+        x = np.cos(theta_grid)
+        y = np.sin(theta_grid)
+        
+        fig.add_trace(go.Surface(x=x, y=y, z=z_grid, colorscale='Greys', opacity=0.6, showscale=False))
+
+    elif shape_type == "Triangular Corner Reflector":
+        # 3 planes meeting at origin (0,0,0)
+        # Plane 1: XY Triangle (0,0,0), (1,0,0), (0,1,0)
+        fig.add_trace(go.Mesh3d(x=[0, 1, 0], y=[0, 0, 1], z=[0, 0, 0], color='magenta', opacity=0.5, i=[0], j=[1], k=[2]))
+        # Plane 2: XZ Triangle (0,0,0), (1,0,0), (0,0,1)
+        fig.add_trace(go.Mesh3d(x=[0, 1, 0], y=[0, 0, 0], z=[0, 0, 1], color='magenta', opacity=0.5, i=[0], j=[1], k=[2]))
+        # Plane 3: YZ Triangle (0,0,0), (0,1,0), (0,0,1)
+        fig.add_trace(go.Mesh3d(x=[0, 0, 0], y=[0, 1, 0], z=[0, 0, 1], color='magenta', opacity=0.5, i=[0], j=[1], k=[2]))
+        
+        # Lines
+        fig.add_trace(go.Scatter3d(x=[0,1,0,0,0,0,0], y=[0,0,0,1,0,0,0], z=[0,0,0,0,0,1,0], mode='lines', line=dict(color='white', width=4)))
+
+    elif shape_type == "Square Corner Reflector":
+        # 3 Square planes meeting at origin
+        # XY Plane: (0,0,0) -> (1,1,0)
+        # We use i,j,k to ensure 2 triangles form the square
+        fig.add_trace(go.Mesh3d(x=[0, 1, 1, 0], y=[0, 0, 1, 1], z=[0, 0, 0, 0], color='pink', opacity=0.5, i=[0, 0], j=[1, 2], k=[2, 3]))
+        # XZ Plane
+        fig.add_trace(go.Mesh3d(x=[0, 1, 1, 0], y=[0, 0, 0, 0], z=[0, 0, 1, 1], color='pink', opacity=0.5, i=[0, 0], j=[1, 2], k=[2, 3]))
+        # YZ Plane
+        fig.add_trace(go.Mesh3d(x=[0, 0, 0, 0], y=[0, 1, 1, 0], z=[0, 0, 1, 1], color='pink', opacity=0.5, i=[0, 0], j=[1, 2], k=[2, 3]))
+        
+        # Wireframe Lines
+        # 3 Axes from origin
+        fig.add_trace(go.Scatter3d(x=[0,1,1,0,0,0,0,0], y=[0,0,1,1,1,0,0,1], z=[0,0,0,0,0,0,1,1], mode='lines', line=dict(color='white', width=4)))
+
+    elif shape_type == "Infinite Cone (Axial/Nose-on)":
+        # Cone
+        # Parametric
+        r = np.linspace(0, 1, 10)
+        theta = np.linspace(0, 2*np.pi, 30)
+        r_grid, theta_grid = np.meshgrid(r, theta)
+        x = r_grid * np.cos(theta_grid)
+        y = r_grid * np.sin(theta_grid)
+        z = r_grid * 2 # Height
+        
+        fig.add_trace(go.Surface(x=x, y=y, z=z, colorscale='Viridis', opacity=0.6, showscale=False))
+
+    # Update Camera to look into the corner (diagonal view)
+    layout_settings['scene']['camera'] = dict(
+        eye=dict(x=1.7, y=1.7, z=1.7),
+        center=dict(x=0, y=0, z=0),
+        up=dict(x=0, y=0, z=1)
+    )
+
+    fig.update_layout(**layout_settings)
+    return fig
 
 # --- Main App ---
 st.set_page_config(page_title="Yuval HW Tool", layout="wide")
@@ -566,7 +670,7 @@ elif selected_tool == "dB Calculator":
 elif selected_tool == "RADAR Calculator":
     st.header("RADAR Calculator")
     
-    radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer", "T-Shape Array Visualizer", "Monostatic Power Budget Calculator"], horizontal=True)
+    radar_tool = st.radio("Select Tool", ["Near Field Calculator", "FMCW Range Resolver", "AWR2243 Chirp Designer", "RCS Calculator (Target Modeling)", "T-Shape Array Visualizer", "Monostatic Power Budget Calculator"], horizontal=True)
     
     if radar_tool == "Near Field Calculator":
         st.subheader("Near Field Calculator")
@@ -781,6 +885,145 @@ elif selected_tool == "RADAR Calculator":
             **Final Limit:**
             *   $R_{max} = \min(R_{max,ADC}, R_{max,FIR})$
             """)
+
+    elif radar_tool == "RCS Calculator (Target Modeling)":
+        
+        # --- Sidebar Theory REMOVED per user request ---
+
+        st.subheader("RCS Calculator (Target Modeling)")
+        st.markdown("Calculate Radar Cross Section (RCS) for canonical shapes in the Optical Region.")
+        
+        # --- Layout: 2 Columns (1:2 ratio for 3D) ---
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.markdown("### Parameters")
+            rcs_freq = st.number_input("Frequency (GHz)", value=77.0, min_value=0.1, step=0.1, format="%.1f")
+            
+            # Derived Wavelength
+            if rcs_freq > 0:
+                rcs_lambda = 299792458 / (rcs_freq * 1e9) # meters
+            else:
+                rcs_lambda = 0
+            
+            rcs_shape = st.selectbox("Target Shape", [
+                "Metal Sphere", 
+                "Flat Metal Plate (Normal Incidence)", 
+                "Cylinder (Normal to Axis)", 
+                "Triangular Corner Reflector", 
+                "Square Corner Reflector", 
+                "Infinite Cone (Axial/Nose-on)"
+            ])
+            
+            # Dynamic Inputs
+            dims = {}
+            if rcs_shape == "Metal Sphere":
+                r_val = st.number_input("Radius r (m)", value=1.000, min_value=0.001, format="%.3f")
+                dims['r'] = r_val
+            elif rcs_shape == "Flat Metal Plate (Normal Incidence)":
+                w_val = st.number_input("Width w (m)", value=0.100, min_value=0.001, format="%.3f")
+                h_val = st.number_input("Height h (m)", value=0.100, min_value=0.001, format="%.3f")
+                dims['w'] = w_val
+                dims['h'] = h_val
+            elif rcs_shape == "Cylinder (Normal to Axis)":
+                r_val = st.number_input("Radius r (m)", value=0.100, min_value=0.001, format="%.3f")
+                l_val = st.number_input("Length L (m)", value=0.500, min_value=0.001, format="%.3f")
+                dims['r'] = r_val
+                dims['L'] = l_val
+            elif rcs_shape == "Triangular Corner Reflector":
+                l_val = st.number_input("Length L (m)", value=0.100, min_value=0.001, format="%.3f")
+                dims['L'] = l_val
+            elif rcs_shape == "Square Corner Reflector":
+                l_val = st.number_input("Length L (m)", value=0.100, min_value=0.001, format="%.3f")
+                dims['L'] = l_val
+            elif rcs_shape == "Infinite Cone (Axial/Nose-on)":
+                alpha_val = st.number_input("Half-angle α (deg)", value=15.0, min_value=0.1, max_value=89.9, step=0.1)
+                dims['alpha'] = alpha_val
+
+            # --- Calculations ---
+            sigma_m2 = 0.0
+            formula_tex = ""
+            
+            if rcs_shape == "Metal Sphere":
+                sigma_m2 = math.pi * dims['r']**2
+                formula_tex = r"\sigma = \pi r^2"
+                
+            elif rcs_shape == "Flat Metal Plate (Normal Incidence)":
+                if rcs_lambda > 0:
+                    sigma_m2 = (4 * math.pi * (dims['w'] * dims['h'])**2) / (rcs_lambda**2)
+                formula_tex = r"\sigma = \frac{4 \pi (w \cdot h)^2}{\lambda^2}"
+                
+            elif rcs_shape == "Cylinder (Normal to Axis)":
+                if rcs_lambda > 0:
+                    sigma_m2 = (2 * math.pi * dims['r'] * dims['L']**2) / rcs_lambda
+                formula_tex = r"\sigma = \frac{2 \pi r L^2}{\lambda}"
+                
+            elif rcs_shape == "Triangular Corner Reflector":
+                if rcs_lambda > 0:
+                    sigma_m2 = (4 * math.pi * dims['L']**4) / (3 * rcs_lambda**2)
+                formula_tex = r"\sigma = \frac{4 \pi L^4}{3 \lambda^2}"
+                
+            elif rcs_shape == "Square Corner Reflector":
+                if rcs_lambda > 0:
+                    sigma_m2 = (12 * math.pi * dims['L']**4) / (rcs_lambda**2)
+                formula_tex = r"\sigma = \frac{12 \pi L^4}{\lambda^2}"
+                
+            elif rcs_shape == "Infinite Cone (Axial/Nose-on)":
+                alpha_rad = math.radians(dims['alpha'])
+                sigma_m2 = (rcs_lambda**2 * math.tan(alpha_rad)**4) / (16 * math.pi)
+                formula_tex = r"\sigma = \frac{\lambda^2 \tan^4(\alpha)}{16 \pi}"
+
+            # dBsm
+            if sigma_m2 > 0:
+                sigma_dbsm = 10 * math.log10(sigma_m2)
+            else:
+                sigma_dbsm = -100.0
+
+            # --- Results ---
+            st.markdown("### Results")
+            # Vertical stack for better fit in smaller column
+            st.metric("Max RCS Area", format_engineering(sigma_m2, "m²"))
+            st.metric("Max RCS (dBsm)", f"{sigma_dbsm:.2f} dBsm")
+            st.latex(formula_tex)
+
+        # --- Visuals (Column 2: 3D) ---
+        with col2:
+            st.markdown("### Target Visualization (3D)")
+            fig_3d = render_3d_shape(rcs_shape)
+            st.plotly_chart(fig_3d, use_container_width=True)
+
+
+        # --- Plotting ---
+        st.markdown("### Frequency Dependence (1 - 100 GHz)")
+        
+        f_arr = np.linspace(1, 100, 200) # GHz
+        lam_arr = 0.299792458 / f_arr # meters
+        
+        # Vectorized Calc
+        if rcs_shape == "Metal Sphere":
+            sig_arr = np.full_like(f_arr, math.pi * dims['r']**2)
+        elif rcs_shape == "Flat Metal Plate (Normal Incidence)":
+            sig_arr = (4 * np.pi * (dims['w'] * dims['h'])**2) / (lam_arr**2)
+        elif rcs_shape == "Cylinder (Normal to Axis)":
+            sig_arr = (2 * np.pi * dims['r'] * dims['L']**2) / lam_arr
+        elif rcs_shape == "Triangular Corner Reflector":
+            sig_arr = (4 * np.pi * dims['L']**4) / (3 * lam_arr**2)
+        elif rcs_shape == "Square Corner Reflector":
+            sig_arr = (12 * np.pi * dims['L']**4) / (lam_arr**2)
+        elif rcs_shape == "Infinite Cone (Axial/Nose-on)":
+            alpha_rad = math.radians(dims['alpha'])
+            sig_arr = (lam_arr**2 * math.tan(alpha_rad)**4) / (16 * np.pi)
+            
+        sig_db_arr = 10 * np.log10(sig_arr + 1e-12)
+        
+        fig_rcs = px.line(x=f_arr, y=sig_db_arr, labels={'x': 'Frequency (GHz)', 'y': 'RCS (dBsm)'}, title=f"RCS vs Frequency: {rcs_shape}")
+        fig_rcs.add_scatter(x=[rcs_freq], y=[sigma_dbsm], mode='markers', marker=dict(size=10, color='red'), name='Current Point')
+        fig_rcs.update_layout(yaxis_title="RCS (dBsm)", xaxis_title="Frequency (GHz)")
+        
+        st.plotly_chart(fig_rcs, use_container_width=True)
+        
+        # --- Credits ---
+        st.caption("Formulas based on Radar Cross Section models by Berkowitz, Knott, & Barton.")
 
     elif radar_tool == "T-Shape Array Visualizer":
         st.subheader("T-Shape Array Visualizer")
