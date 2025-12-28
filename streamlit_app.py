@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.14"
+APP_VERSION = "Rev 3.15"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -209,6 +209,23 @@ def render_3d_shape(shape_type):
         y = np.sin(theta_grid)
         
         fig.add_trace(go.Surface(x=x, y=y, z=z_grid, colorscale='Greys', opacity=0.6, showscale=False))
+
+    elif shape_type == "Circular Disc":
+        # Parametric Disc (filled circle in XY plane)
+        r_disc = np.linspace(0, 1, 10)
+        theta_disc = np.linspace(0, 2*np.pi, 30)
+        r_grid, theta_grid = np.meshgrid(r_disc, theta_disc)
+        x = r_grid * np.cos(theta_grid)
+        y = r_grid * np.sin(theta_grid)
+        z = np.zeros_like(x) # Z=0 flat
+        
+        fig.add_trace(go.Surface(x=x, y=y, z=z, colorscale='Oranges', opacity=0.8, showscale=False))
+        # Wireframe rim
+        theta_rim = np.linspace(0, 2*np.pi, 50)
+        x_rim = np.cos(theta_rim)
+        y_rim = np.sin(theta_rim)
+        z_rim = np.zeros_like(theta_rim)
+        fig.add_trace(go.Scatter3d(x=x_rim, y=y_rim, z=z_rim, mode='lines', line=dict(color='white', width=4)))
 
     elif shape_type == "Triangular Corner Reflector":
         # 3 planes meeting at origin (0,0,0)
@@ -912,7 +929,8 @@ elif selected_tool == "RADAR Calculator":
                 "Cylinder (Normal to Axis)", 
                 "Triangular Corner Reflector", 
                 "Square Corner Reflector", 
-                "Infinite Cone (Axial/Nose-on)"
+                "Infinite Cone (Axial/Nose-on)",
+                "Circular Disc"
             ])
             
             # Dynamic Inputs
@@ -939,6 +957,9 @@ elif selected_tool == "RADAR Calculator":
             elif rcs_shape == "Infinite Cone (Axial/Nose-on)":
                 alpha_val = st.number_input("Half-angle α (deg)", value=15.0, min_value=0.1, max_value=89.9, step=0.1)
                 dims['alpha'] = alpha_val
+            elif rcs_shape == "Circular Disc":
+                d_val = st.number_input("Diameter D (m)", value=0.0215, min_value=0.001, format="%.4f")
+                dims['D'] = d_val
 
             # --- Calculations ---
             sigma_m2 = 0.0
@@ -972,6 +993,13 @@ elif selected_tool == "RADAR Calculator":
                 alpha_rad = math.radians(dims['alpha'])
                 sigma_m2 = (rcs_lambda**2 * math.tan(alpha_rad)**4) / (16 * math.pi)
                 formula_tex = r"\sigma = \frac{\lambda^2 \tan^4(\alpha)}{16 \pi}"
+                
+            elif rcs_shape == "Circular Disc":
+                # Area = pi * (D/2)^2
+                area = math.pi * (dims['D'] / 2.0)**2
+                if rcs_lambda > 0:
+                    sigma_m2 = (4 * math.pi * area**2) / (rcs_lambda**2)
+                formula_tex = r"\sigma = \frac{4 \pi A^2}{\lambda^2}, \quad A = \pi (D/2)^2"
 
             # dBsm
             if sigma_m2 > 0:
@@ -1013,6 +1041,11 @@ elif selected_tool == "RADAR Calculator":
         elif rcs_shape == "Infinite Cone (Axial/Nose-on)":
             alpha_rad = math.radians(dims['alpha'])
             sig_arr = (lam_arr**2 * math.tan(alpha_rad)**4) / (16 * np.pi)
+        elif rcs_shape == "Circular Disc":
+            area = math.pi * (dims['D'] / 2.0)**2
+            # Vectorized sigma = 4 pi A^2 / lambda^2
+            # lam_arr is an array
+            sig_arr = (4 * np.pi * area**2) / (lam_arr**2)
             
         sig_db_arr = 10 * np.log10(sig_arr + 1e-12)
         
