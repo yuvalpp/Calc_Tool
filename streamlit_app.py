@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.22"
+APP_VERSION = "Rev 3.23"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -987,12 +987,16 @@ elif selected_tool == "RADAR Calculator":
         # 1. Grid-Based Calculation (Union / Intersection / Occlusion)
         grid_res = 0.1 
         x_max_bound = r_max * 1.2
-        x_grid = np.arange(-x_max_bound, x_max_bound, grid_res)
+        # Use symmetric X grid
+        x_half = np.arange(grid_res/2.0, x_max_bound, grid_res)
+        x_grid = np.concatenate([-x_half[::-1], x_half])
         
-        # Y Range: Centered Grid ensures Symmetry
+        # Y Range: Mirrored Half-Grid around Midpoint (Separation/2)
         midpoint_y = radar_sep / 2.0
         y_extent = max(r_max, radar_sep) * 1.5
-        y_grid = np.arange(midpoint_y - y_extent, midpoint_y + y_extent, grid_res)
+        # Generate positive offsets starting from half-step to avoid double-counting center
+        half_y_offsets = np.arange(grid_res/2.0, y_extent, grid_res) 
+        y_grid = np.concatenate([midpoint_y - half_y_offsets[::-1], midpoint_y + half_y_offsets])
         
         xx, yy = np.meshgrid(x_grid, y_grid)
         
@@ -1054,7 +1058,16 @@ elif selected_tool == "RADAR Calculator":
         if r1_active: total_blind_area_dual += area_blind_single
         if r2_active: total_blind_area_dual += area_blind_single
         
-        # Metrics
+        # Metrics Equality Check (Cosmetic)
+        # If the physics suggests identical setup, we force displayed numbers to match to avoid confusion.
+        if r1_active and r2_active:
+             diff_area = abs(area_r1_only - area_r2_only)
+             if diff_area < 0.5: # User defined tolerance
+                 avg_val = (area_r1_only + area_r2_only) / 2.0
+                 area_r1_only = avg_val
+                 area_r2_only = avg_val
+        
+        # Metrics Output
         c_d1, c_d2, c_d3, c_d4 = st.columns(4)
         c_d1.metric("Total Coverage (Union)", format_engineering(area_union, "m²"), help="Valid coverage area")
         c_d2.metric("Dual Coverage (Intersection)", format_engineering(area_intersect, "m²"), help="Overlap of valid areas")
