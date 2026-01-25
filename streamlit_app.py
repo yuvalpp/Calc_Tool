@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.15"
+APP_VERSION = "Rev 3.19"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -785,6 +785,18 @@ elif selected_tool == "RADAR Calculator":
             with col_in3:
                 c_speed = st.number_input("Speed of light c (m/s)", value=3e8, format="%.2e")
 
+
+
+
+        # --- Arena Coverage Settings ---
+        with st.expander("🏟️ Arena Coverage Settings", expanded=True):
+            col_arena1, col_arena2 = st.columns(2)
+            with col_arena1:
+                # Default 45 deg (Total 90 deg view)
+                scan_limit_deg = st.slider("Azimuth Scan Limit (± deg)", 10, 90, 45, key="arena_scan", help="Total Field of View will be 2x this value.")
+            with col_arena2:
+                blind_zone_m = st.number_input("Near-Field Blind Zone (m)", value=1.0, min_value=0.0, step=0.1, key="arena_blind", help="Area too close to antenna to be usable.")
+
         # --- Calculations ---
         # Unit conversions
         S = slope * 1e12 # Hz/s
@@ -899,9 +911,195 @@ elif selected_tool == "RADAR Calculator":
             *   $f_{b,max,FIR} = IF_{max}$
             *   $R_{max,FIR} = c \times f_{b,max,FIR} / (2 \times S)$
             
-            **Final Limit:**
+            # Final Limit:
             *   $R_{max} = \min(R_{max,ADC}, R_{max,FIR})$
             """)
+
+        # --- Arena Calculation & Visualization ---
+        st.markdown("---")
+        st.subheader("Arena Coverage Analysis")
+        
+        # Helper Area function for single radar
+        theta_rad = math.radians(2 * scan_limit_deg)
+        r_usable_max = max(r_max, blind_zone_m)
+        r_usable_min = min(r_max, blind_zone_m)
+        
+        # Basic Single Area breakdown (used for reference)
+        area_total_single = (theta_rad / 2.0) * (r_max**2)
+        area_blind_single = (theta_rad / 2.0) * (blind_zone_m**2)
+        area_net_single = max(0, area_total_single - area_blind_single)
+
+        # --- Single Radar Mode (Rev 3.17 Logic) ---
+        if r_max <= blind_zone_m:
+             st.warning("Blind Zone is larger than Max Range! Usable Area is 0.")
+
+        # Results
+        col_ar1, col_ar2, col_ar3 = st.columns(3)
+        col_ar1.metric("Total Cone Area", format_engineering(area_total_single, "m²"), help="Theoretical area if no blind zone")
+        col_ar2.metric("Dead Zone Area", format_engineering(area_blind_single, "m²"), help="Unusable area near radar")
+        col_ar3.metric("Net Usable Area", format_engineering(area_net_single, "m²"), help="Total - Blind")
+        
+        st.latex(r"A_{net} = \frac{\theta_{rad}}{2}(R_{max}^2 - R_{min}^2)")
+
+        # Visualization (Polar)
+        theta_vals_deg = np.linspace(90 - scan_limit_deg, 90 + scan_limit_deg, 100)
+        
+        fig_arena = go.Figure()
+
+        # Green (Total)
+        r_total_poly = np.concatenate([[0], np.full_like(theta_vals_deg, r_max), [0]])
+        theta_total_poly = np.concatenate([[90], theta_vals_deg, [90]])
+        
+        fig_arena.add_trace(go.Scatterpolar(
+            r=r_total_poly, theta=theta_total_poly, fill='toself', name='Total Coverage',
+            mode='lines', line=dict(color='green', width=1), fillcolor='rgba(0, 255, 0, 0.2)', hoverinfo='skip'
+        ))
+        
+        # Red (Blind)
+        r_blind_poly = np.concatenate([[0], np.full_like(theta_vals_deg, blind_zone_m), [0]])
+        theta_blind_poly = theta_total_poly
+        
+        fig_arena.add_trace(go.Scatterpolar(
+            r=r_blind_poly, theta=theta_blind_poly, fill='toself', name='Blind Zone',
+            mode='lines', line=dict(color='red', width=1), fillcolor='rgba(255, 0, 0, 0.5)', hoverinfo='skip'
+        ))
+        
+        fig_arena.update_layout(
+            title="Coverage Map (North Up)",
+            polar=dict(angularaxis=dict(rotation=0, direction="counterclockwise"), radialaxis=dict(visible=True, range=[0, r_max * 1.1])),
+            margin=dict(l=20, r=20, t=30, b=20), height=400, showlegend=True
+        )
+        st.plotly_chart(fig_arena, use_container_width=True)
+
+        # --- Dual Radar Mode (Permanent) ---
+        st.markdown("---")
+        st.subheader("Dual Radar Simulation (Head-to-Head)")
+        
+        # Controls Row
+        c_dr_ctrl1, c_dr_ctrl2, c_dr_ctrl3 = st.columns(3)
+        with c_dr_ctrl1:
+            radar_sep = st.number_input("Radar Separation (m)", value=10.0, min_value=1.0, step=0.5)
+        with c_dr_ctrl2:
+            r1_active = st.checkbox("Radar 1 (Bottom) Active", value=True)
+        with c_dr_ctrl3:
+            r2_active = st.checkbox("Radar 2 (Top) Active", value=True)
+        
+        # 1. Grid-Based Calculation (Union / Intersection)
+        grid_res = 0.2
+        x_max_bound = r_max * 1.2
+        x_grid = np.arange(-x_max_bound, x_max_bound, grid_res)
+        y_min_bound = -r_max * 0.5
+        y_max_bound = radar_sep + r_max * 0.5
+        y_grid = np.arange(y_min_bound, y_max_bound, grid_res)
+        
+        xx, yy = np.meshgrid(x_grid, y_grid)
+        
+        # Radar 1 Logic
+        r1_dist = np.sqrt(xx**2 + yy**2)
+        r1_ang_diff = np.abs(np.arctan2(yy, xx) - np.pi/2)
+        scan_rad = math.radians(scan_limit_deg)
+        mask_r1 = (r1_dist >= blind_zone_m) & (r1_dist <= r_max) & (r1_ang_diff <= scan_rad)
+        if not r1_active: mask_r1[:] = False
+        
+        # Radar 2 Logic
+        dx2 = xx
+        dy2 = yy - radar_sep
+        r2_dist = np.sqrt(dx2**2 + dy2**2)
+        # Check angle vs -90 deg
+        with np.errstate(divide='ignore', invalid='ignore'):
+             cos_alpha = -dy2 / r2_dist
+        cos_alpha = np.nan_to_num(cos_alpha, nan=-1.0)
+        mask_r2_ang = cos_alpha >= math.cos(scan_rad)
+        mask_r2 = (r2_dist >= blind_zone_m) & (r2_dist <= r_max) & mask_r2_ang
+        if not r2_active: mask_r2[:] = False
+        
+        # Integration
+        cell_area = grid_res * grid_res
+        
+        # Areas
+        area_intersect = np.sum(mask_r1 & mask_r2) * cell_area
+        area_union = np.sum(mask_r1 | mask_r2) * cell_area
+        overlap_pct = (area_intersect / area_union * 100) if area_union > 0 else 0.0
+        
+        # Total Blind Area Calculation
+        # Simple sum of analytical blind areas for active radars
+        total_blind_area_dual = 0.0
+        if r1_active: total_blind_area_dual += area_blind_single
+        if r2_active: total_blind_area_dual += area_blind_single
+        
+        # Metrics
+        c_d1, c_d2, c_d3, c_d4 = st.columns(4)
+        c_d1.metric("Total Coverage (Union)", format_engineering(area_union, "m²"))
+        c_d2.metric("Dual Coverage (Intersection)", format_engineering(area_intersect, "m²"))
+        c_d3.metric("Overlap Percentage", f"{overlap_pct:.1f} %")
+        c_d4.metric("Total Blind Area", format_engineering(total_blind_area_dual, "m²"))
+        
+        # 2. Visualization (Passage Map - Cartesian)
+        fig_pass = go.Figure()
+        
+        # Helper to generate wedge poly
+        def get_wedge_coords(cx, cy, r_in, r_out, center_deg, half_fov_deg):
+            angles = np.linspace(center_deg - half_fov_deg, center_deg + half_fov_deg, 50)
+            x_out = cx + r_out * np.cos(np.radians(angles))
+            y_out = cy + r_out * np.sin(np.radians(angles))
+            x_in = cx + r_in * np.cos(np.radians(angles[::-1]))
+            y_in = cy + r_in * np.sin(np.radians(angles[::-1]))
+            x_poly = np.concatenate([x_out, x_in, [x_out[0]]])
+            y_poly = np.concatenate([y_out, y_in, [y_out[0]]])
+            return x_poly, y_poly
+
+        # Draw Bottom Layer: Usable Coverage
+        if r1_active:
+            x1, y1 = get_wedge_coords(0, 0, blind_zone_m, r_max, 90, scan_limit_deg)
+            fig_pass.add_trace(go.Scatter(
+                x=x1, y=y1, fill='toself', mode='lines', name='Radar 1 Coverage',
+                line=dict(color='blue', width=1), fillcolor='rgba(0, 0, 255, 0.3)', hoverinfo='skip'
+            ))
+            # Text Label
+            fig_pass.add_trace(go.Scatter(
+                x=[0], y=[-r_max*0.1], mode='text', text=['RADAR 1'], 
+                textfont=dict(size=14, color='black')
+            ))
+
+        if r2_active:
+            x2, y2 = get_wedge_coords(0, radar_sep, blind_zone_m, r_max, 270, scan_limit_deg)
+            fig_pass.add_trace(go.Scatter(
+                x=x2, y=y2, fill='toself', mode='lines', name='Radar 2 Coverage',
+                line=dict(color='red', width=1), fillcolor='rgba(255, 0, 0, 0.3)', hoverinfo='skip'
+            ))
+            # Text Label
+            fig_pass.add_trace(go.Scatter(
+                x=[0], y=[radar_sep + r_max*0.1], mode='text', text=['RADAR 2'], 
+                textfont=dict(size=14, color='black')
+            ))
+
+        # Draw Top Layer: Blind Zones (Grey)
+        # Just drawing the "Hole" as a filled polygon
+        if r1_active and blind_zone_m > 0:
+             # Full wedge from 0 to BlindZoneM
+             bx1, by1 = get_wedge_coords(0, 0, 0, blind_zone_m, 90, scan_limit_deg)
+             fig_pass.add_trace(go.Scatter(
+                x=bx1, y=by1, fill='toself', mode='lines', name='R1 Blind Zone',
+                line=dict(color='rgb(50, 50, 50)', width=1), fillcolor='rgba(50, 50, 50, 0.5)', hoverinfo='skip'
+            ))
+
+        if r2_active and blind_zone_m > 0:
+             bx2, by2 = get_wedge_coords(0, radar_sep, 0, blind_zone_m, 270, scan_limit_deg)
+             fig_pass.add_trace(go.Scatter(
+                x=bx2, y=by2, fill='toself', mode='lines', name='R2 Blind Zone',
+                line=dict(color='rgb(50, 50, 50)', width=1), fillcolor='rgba(50, 50, 50, 0.5)', hoverinfo='skip'
+            ))
+
+        fig_pass.update_layout(
+            title="Passage Map (Top Down View)",
+            xaxis_title="Cross-Range (m)", yaxis_title="Down-Range (m)",
+            xaxis=dict(scaleanchor="y", scaleratio=1), 
+            margin=dict(l=20, r=20, t=30, b=20), height=500, showlegend=True,
+            dragmode='pan'
+        )
+        st.plotly_chart(fig_pass, use_container_width=True)
+
+
 
     elif radar_tool == "RCS Calculator (Target Modeling)":
         
