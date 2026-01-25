@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.20"
+APP_VERSION = "Rev 3.21"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -984,122 +984,174 @@ elif selected_tool == "RADAR Calculator":
         with c_dr_ctrl3:
             r2_active = st.checkbox("Radar 2 (Top) Active", value=True)
         
-        # 1. Grid-Based Calculation (Union / Intersection)
-        grid_res = 0.2
+        # 1. Grid-Based Calculation (Union / Intersection / Occlusion)
+        grid_res = 0.1 # increased precision
         x_max_bound = r_max * 1.2
         x_grid = np.arange(-x_max_bound, x_max_bound, grid_res)
-        y_min_bound = -r_max * 0.5
-        y_max_bound = radar_sep + r_max * 0.5
+        
+        # Y Range: Must cover -Rmax to Sep+Rmax to catch "blocked" areas behind sensors
+        y_min_bound = -r_max * 1.1
+        y_max_bound = radar_sep + r_max * 1.1
         y_grid = np.arange(y_min_bound, y_max_bound, grid_res)
         
         xx, yy = np.meshgrid(x_grid, y_grid)
         
-        # Radar 1 Logic
+        # --- Radar 1 Logic (At 0,0 facing +Y) ---
         r1_dist = np.sqrt(xx**2 + yy**2)
         r1_ang_diff = np.abs(np.arctan2(yy, xx) - np.pi/2)
         scan_rad = math.radians(scan_limit_deg)
-        mask_r1 = (r1_dist >= blind_zone_m) & (r1_dist <= r_max) & (r1_ang_diff <= scan_rad)
-        if not r1_active: mask_r1[:] = False
+        mask_r1_theo = (r1_dist >= blind_zone_m) & (r1_dist <= r_max) & (r1_ang_diff <= scan_rad)
         
-        # Radar 2 Logic
+        # R1 Occlusion: Valid only if y <= radar_sep. Blocked if y > radar_sep
+        mask_r1_valid = mask_r1_theo & (yy <= radar_sep)
+        mask_r1_blocked = mask_r1_theo & (yy > radar_sep)
+        
+        if not r1_active: 
+            mask_r1_valid[:] = False
+            mask_r1_blocked[:] = False
+        
+        # --- Radar 2 Logic (At 0, Sep facing -Y) ---
         dx2 = xx
         dy2 = yy - radar_sep
         r2_dist = np.sqrt(dx2**2 + dy2**2)
-        # Check angle vs -90 deg
+        
         with np.errstate(divide='ignore', invalid='ignore'):
              cos_alpha = -dy2 / r2_dist
         cos_alpha = np.nan_to_num(cos_alpha, nan=-1.0)
         mask_r2_ang = cos_alpha >= math.cos(scan_rad)
-        mask_r2 = (r2_dist >= blind_zone_m) & (r2_dist <= r_max) & mask_r2_ang
-        if not r2_active: mask_r2[:] = False
+        mask_r2_theo = (r2_dist >= blind_zone_m) & (r2_dist <= r_max) & mask_r2_ang
+        
+        # R2 Occlusion: Valid only if y >= 0. Blocked if y < 0
+        mask_r2_valid = mask_r2_theo & (yy >= 0)
+        mask_r2_blocked = mask_r2_theo & (yy < 0)
+        
+        if not r2_active:
+            mask_r2_valid[:] = False
+            mask_r2_blocked[:] = False
         
         # Integration
         cell_area = grid_res * grid_res
         
-        # Areas
-        area_intersect = np.sum(mask_r1 & mask_r2) * cell_area
-        area_union = np.sum(mask_r1 | mask_r2) * cell_area
+        # Areas (Using Valid Masks)
+        area_intersect = np.sum(mask_r1_valid & mask_r2_valid) * cell_area
+        area_union = np.sum(mask_r1_valid | mask_r2_valid) * cell_area
         overlap_pct = (area_intersect / area_union * 100) if area_union > 0 else 0.0
         
-        # Total Blind Area Calculation
-        # Simple sum of analytical blind areas for active radars
+        # Blocked Area (Shadowed)
+        area_blocked = np.sum(mask_r1_blocked | mask_r2_blocked) * cell_area
+        
+        # Total Blind Area (Near Field Hole) - purely analytical estimation for display
         total_blind_area_dual = 0.0
         if r1_active: total_blind_area_dual += area_blind_single
         if r2_active: total_blind_area_dual += area_blind_single
         
         # Metrics
         c_d1, c_d2, c_d3, c_d4 = st.columns(4)
-        c_d1.metric("Total Coverage (Union)", format_engineering(area_union, "m²"))
-        c_d2.metric("Dual Coverage (Intersection)", format_engineering(area_intersect, "m²"))
-        c_d3.metric("Overlap Percentage", f"{overlap_pct:.1f} %")
-        c_d4.metric("Total Blind Area", format_engineering(total_blind_area_dual, "m²"))
+        c_d1.metric("Total Coverage (Union)", format_engineering(area_union, "m²"), help="Valid coverage area")
+        c_d2.metric("Dual Coverage (Intersection)", format_engineering(area_intersect, "m²"), help="Overlap of valid areas")
+        c_d3.metric("Blocked Area (Shadow)", format_engineering(area_blocked, "m²"), help="Theoretical coverage blocked by the other radar")
+        c_d4.metric("Total Blind Area", format_engineering(total_blind_area_dual, "m²"), help="Near-field blind zones")
         
         with st.expander("Methodology: Grid-Based Integration"):
             st.markdown("""
             **Area Calculation Method:**
-            Analytical intersection of separated circular sectors is complex. We use a **Grid-Based Numerical Integration** approach.
-            1.  A 2D mesh grid is generated over the simulation area (Resolution $\Delta_{grid} = 0.2$ m).
-            2.  For each point $(x, y)$, we check if it falls within the active coverage wedge of Radar 1 and Radar 2.
-            3.  **Union Area ($A_{union}$)** counts points covered by *at least one* radar.
-            4.  **Intersection Area ($A_{inter}$)** counts points covered by *both* radars.
+            1.  **Grid:** High-precision mesh ($\Delta = 0.1$ m).
+            2.  **Occlusion (Shadowing):**
+                *   Radar 1 (Bottom) is blocked for $Y > \text{Separation}$.
+                *   Radar 2 (Top) is blocked for $Y < 0$.
+            3.  **Metrics:**
+                *   **Usable:** Valid areas respecting occlusion.
+                *   **Blocked:** Area lost due to shadowing.
             """)
             st.latex(r"A \approx N_{points} \times \Delta_{grid}^2")
 
         # 2. Visualization (Passage Map - Cartesian)
         fig_pass = go.Figure()
         
-        # Helper to generate wedge poly
-        def get_wedge_coords(cx, cy, r_in, r_out, center_deg, half_fov_deg):
-            angles = np.linspace(center_deg - half_fov_deg, center_deg + half_fov_deg, 50)
-            x_out = cx + r_out * np.cos(np.radians(angles))
-            y_out = cy + r_out * np.sin(np.radians(angles))
-            x_in = cx + r_in * np.cos(np.radians(angles[::-1]))
-            y_in = cy + r_in * np.sin(np.radians(angles[::-1]))
+        # Helper: Generate Wedge Polygon with radial clipping for blockage
+        # clip_y_min/max: define the valid Y-band. 
+        # For R1: Clip Y Max = Sep. For R2: Clip Y Min = 0.
+        
+        def get_clipped_wedge_coords(cx, cy, r_in, r_out, center_deg, half_fov_deg, y_limit, is_r1):
+            angles = np.linspace(center_deg - half_fov_deg, center_deg + half_fov_deg, 100)
+            rads = np.radians(angles)
+            
+            # For each angle, determining the effective radius based on Y-limit
+            # R1 (up): y = cy + r*sin(th). y_limit = Sep. Max valid r: r*sin(th) <= Sep-cy => r <= (Sep-cy)/sin(th)
+            # R2 (down): y = cy + r*sin(th). y_limit = 0. Max valid r: y >= 0. cy+r*sin(th) >= 0 => r*sin(th) >= -cy. 
+            # Note sinus is negative for R2 angles (approx 270). 
+            
+            valid_r_out = np.full_like(rads, r_out)
+            
+            for i, th in enumerate(rads):
+                sin_th = np.sin(th)
+                if abs(sin_th) < 1e-6: continue 
+                
+                if is_r1:
+                    # Limit if y > y_limit
+                    # y = 0 + r*sin. limit y_limit. r_lim = y_limit / sin_th
+                    if sin_th > 0:
+                        r_lim = (y_limit - cy) / sin_th
+                        if r_lim < r_out: valid_r_out[i] = r_lim
+                else:
+                    # R2: y = Sep + r*sin. limit 0. r*sin >= -Sep. r <= -Sep/sin (since sin < 0, div by neg flips inequality? No.)
+                    # Let's say Sep=10. y < 0 is blocked. Valid is y >= 0.
+                    # 10 + r*sin >= 0 => r*sin >= -10 => r <= -10/sin (sin is neg e.g. -1). r <= 10. Correct.
+                    if sin_th < 0:
+                        r_lim = (0 - cy) / sin_th
+                        if r_lim < r_out: valid_r_out[i] = r_lim
+
+            # Valid Polygon (Usable)
+            x_out = cx + valid_r_out * np.cos(rads)
+            y_out = cy + valid_r_out * np.sin(rads)
+            
+            x_in = cx + r_in * np.cos(rads[::-1])
+            y_in = cy + r_in * np.sin(rads[::-1])
+            
             x_poly = np.concatenate([x_out, x_in, [x_out[0]]])
             y_poly = np.concatenate([y_out, y_in, [y_out[0]]])
+            
             return x_poly, y_poly
 
-        # Draw Bottom Layer: Usable Coverage
+        # Draw Blocked/Shadowed Layer First (Bottom)
+        # We simulate this by drawing the FULL wedge in Black, then drawing Valid on top?
+        # Or explicitly calculate blocked poly? 
+        # Easier: Draw Full in Black (Blocked Color), then Draw Valid in Color on top.
+        # But we need "Black" only where it *would* exist. 
+        # So: Draw r_in to r_max in Black. 
+        
         if r1_active:
-            x1, y1 = get_wedge_coords(0, 0, blind_zone_m, r_max, 90, scan_limit_deg)
-            fig_pass.add_trace(go.Scatter(
-                x=x1, y=y1, fill='toself', mode='lines', name='Radar 1 Coverage',
-                line=dict(color='blue', width=1), fillcolor='rgba(0, 0, 255, 0.3)', hoverinfo='skip'
-            ))
-            # Text Label
-            fig_pass.add_trace(go.Scatter(
-                x=[0], y=[-r_max*0.1], mode='text', text=['RADAR 1'], 
-                textfont=dict(size=14, color='black')
-            ))
+            # 1. Full Potential Wedge (Shadow)
+            sx1, sy1 = get_clipped_wedge_coords(0, 0, blind_zone_m, r_max, 90, scan_limit_deg, 9999, True) # No limit
+            fig_pass.add_trace(go.Scatter(x=sx1, y=sy1, fill='toself', mode='none', name='R1 Shadow', fillcolor='rgba(0,0,0,0.2)', hoverinfo='skip', showlegend=False))
+            
+            # 2. Valid Wedge (Blue)
+            vx1, vy1 = get_clipped_wedge_coords(0, 0, blind_zone_m, r_max, 90, scan_limit_deg, radar_sep, True)
+            fig_pass.add_trace(go.Scatter(x=vx1, y=vy1, fill='toself', mode='lines', name='R1 Usable', line=dict(color='blue', width=1), fillcolor='rgba(0, 0, 255, 0.3)', hoverinfo='skip'))
+            
+            # Label
+            fig_pass.add_trace(go.Scatter(x=[0], y=[-2], mode='text', text=['RADAR 1'], textfont=dict(size=14, color='black')))
 
         if r2_active:
-            x2, y2 = get_wedge_coords(0, radar_sep, blind_zone_m, r_max, 270, scan_limit_deg)
-            fig_pass.add_trace(go.Scatter(
-                x=x2, y=y2, fill='toself', mode='lines', name='Radar 2 Coverage',
-                line=dict(color='red', width=1), fillcolor='rgba(255, 0, 0, 0.3)', hoverinfo='skip'
-            ))
-            # Text Label
-            fig_pass.add_trace(go.Scatter(
-                x=[0], y=[radar_sep + r_max*0.1], mode='text', text=['RADAR 2'], 
-                textfont=dict(size=14, color='black')
-            ))
+            # 1. Full Potential Wedge (Shadow)
+            sx2, sy2 = get_clipped_wedge_coords(0, radar_sep, blind_zone_m, r_max, 270, scan_limit_deg, -9999, False)
+            fig_pass.add_trace(go.Scatter(x=sx2, y=sy2, fill='toself', mode='none', name='R2 Shadow', fillcolor='rgba(0,0,0,0.2)', hoverinfo='skip', showlegend=False))
+            
+            # 2. Valid Wedge (Red)
+            vx2, vy2 = get_clipped_wedge_coords(0, radar_sep, blind_zone_m, r_max, 270, scan_limit_deg, 0, False)
+            fig_pass.add_trace(go.Scatter(x=vx2, y=vy2, fill='toself', mode='lines', name='R2 Usable', line=dict(color='red', width=1), fillcolor='rgba(255, 0, 0, 0.3)', hoverinfo='skip'))
+            
+            # Label
+            fig_pass.add_trace(go.Scatter(x=[0], y=[radar_sep + 2], mode='text', text=['RADAR 2'], textfont=dict(size=14, color='black')))
 
-        # Draw Top Layer: Blind Zones (Grey)
-        # Just drawing the "Hole" as a filled polygon
+        # Draw Blind Zones (Top Layer)
         if r1_active and blind_zone_m > 0:
-             # Full wedge from 0 to BlindZoneM
-             bx1, by1 = get_wedge_coords(0, 0, 0, blind_zone_m, 90, scan_limit_deg)
-             fig_pass.add_trace(go.Scatter(
-                x=bx1, y=by1, fill='toself', mode='lines', name='R1 Blind Zone',
-                line=dict(color='rgb(50, 50, 50)', width=1), fillcolor='rgba(50, 50, 50, 0.5)', hoverinfo='skip'
-            ))
+             bx1, by1 = get_clipped_wedge_coords(0, 0, 0, blind_zone_m, 90, scan_limit_deg, 9999, True)
+             fig_pass.add_trace(go.Scatter(x=bx1, y=by1, fill='toself', mode='lines', name='R1 Blind', line=dict(color='rgb(50,50,50)', width=1), fillcolor='rgba(50,50,50,0.8)', hoverinfo='skip'))
 
         if r2_active and blind_zone_m > 0:
-             bx2, by2 = get_wedge_coords(0, radar_sep, 0, blind_zone_m, 270, scan_limit_deg)
-             fig_pass.add_trace(go.Scatter(
-                x=bx2, y=by2, fill='toself', mode='lines', name='R2 Blind Zone',
-                line=dict(color='rgb(50, 50, 50)', width=1), fillcolor='rgba(50, 50, 50, 0.5)', hoverinfo='skip'
-            ))
+             bx2, by2 = get_clipped_wedge_coords(0, radar_sep, 0, blind_zone_m, 270, scan_limit_deg, -9999, False)
+             fig_pass.add_trace(go.Scatter(x=bx2, y=by2, fill='toself', mode='lines', name='R2 Blind', line=dict(color='rgb(50,50,50)', width=1), fillcolor='rgba(50,50,50,0.8)', hoverinfo='skip'))
 
         fig_pass.update_layout(
             title="Passage Map (Top Down View)",
