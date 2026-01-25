@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.19"
+APP_VERSION = "Rev 3.20"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -1034,6 +1034,17 @@ elif selected_tool == "RADAR Calculator":
         c_d3.metric("Overlap Percentage", f"{overlap_pct:.1f} %")
         c_d4.metric("Total Blind Area", format_engineering(total_blind_area_dual, "m²"))
         
+        with st.expander("Methodology: Grid-Based Integration"):
+            st.markdown("""
+            **Area Calculation Method:**
+            Analytical intersection of separated circular sectors is complex. We use a **Grid-Based Numerical Integration** approach.
+            1.  A 2D mesh grid is generated over the simulation area (Resolution $\Delta_{grid} = 0.2$ m).
+            2.  For each point $(x, y)$, we check if it falls within the active coverage wedge of Radar 1 and Radar 2.
+            3.  **Union Area ($A_{union}$)** counts points covered by *at least one* radar.
+            4.  **Intersection Area ($A_{inter}$)** counts points covered by *both* radars.
+            """)
+            st.latex(r"A \approx N_{points} \times \Delta_{grid}^2")
+
         # 2. Visualization (Passage Map - Cartesian)
         fig_pass = go.Figure()
         
