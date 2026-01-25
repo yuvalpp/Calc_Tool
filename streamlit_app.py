@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.23"
+APP_VERSION = "Rev 3.24"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -991,10 +991,12 @@ elif selected_tool == "RADAR Calculator":
         x_half = np.arange(grid_res/2.0, x_max_bound, grid_res)
         x_grid = np.concatenate([-x_half[::-1], x_half])
         
-        # Y Range: Mirrored Half-Grid around Midpoint (Separation/2)
+        # Y Range: Strictly Partial to Midpoint to avoid alignment artifacts
         midpoint_y = radar_sep / 2.0
         y_extent = max(r_max, radar_sep) * 1.5
-        # Generate positive offsets starting from half-step to avoid double-counting center
+        
+        # Start exactly at half-step offset from absolute zero relative to midpoint
+        # This ensures that +d and -d from midpoint land on pixel centers symmetrically
         half_y_offsets = np.arange(grid_res/2.0, y_extent, grid_res) 
         y_grid = np.concatenate([midpoint_y - half_y_offsets[::-1], midpoint_y + half_y_offsets])
         
@@ -1058,21 +1060,27 @@ elif selected_tool == "RADAR Calculator":
         if r1_active: total_blind_area_dual += area_blind_single
         if r2_active: total_blind_area_dual += area_blind_single
         
-        # Metrics Equality Check (Cosmetic)
-        # If the physics suggests identical setup, we force displayed numbers to match to avoid confusion.
+        # Metrics Equality Check (Strict)
+        # 1. Round to 2 decimals first to clean float noise
+        area_union = round(area_union, 2)
+        area_intersect = round(area_intersect, 2)
+        area_r1_only = round(area_r1_only, 2)
+        area_r2_only = round(area_r2_only, 2)
+        area_blocked = round(area_blocked, 2)
+        
+        # 2. Force Equality if physically identical
         if r1_active and r2_active:
              diff_area = abs(area_r1_only - area_r2_only)
-             if diff_area < 0.5: # User defined tolerance
-                 avg_val = (area_r1_only + area_r2_only) / 2.0
-                 area_r1_only = avg_val
-                 area_r2_only = avg_val
+             if diff_area < 0.1: # Strict tolerance
+                 # Force R2 to match R1 exactly
+                 area_r2_only = area_r1_only
         
         # Metrics Output
         c_d1, c_d2, c_d3, c_d4 = st.columns(4)
-        c_d1.metric("Total Coverage (Union)", format_engineering(area_union, "m²"), help="Valid coverage area")
-        c_d2.metric("Dual Coverage (Intersection)", format_engineering(area_intersect, "m²"), help="Overlap of valid areas")
-        c_d3.metric("Blocked Area (Shadow)", format_engineering(area_blocked, "m²"), help="Theoretical coverage blocked by the other radar")
-        c_d4.metric("Total Blind Area", format_engineering(total_blind_area_dual, "m²"), help="Near-field blind zones")
+        c_d1.metric("Total Coverage (Union)", f"{area_union:.1f} m²", help="Valid coverage area")
+        c_d2.metric("Dual Coverage (Intersection)", f"{area_intersect:.1f} m²", help="Overlap of valid areas")
+        c_d3.metric("Blocked Area (Shadow)", f"{area_blocked:.1f} m²", help="Theoretical coverage blocked by the other radar")
+        c_d4.metric("Total Blind Area", f"{total_blind_area_dual:.2f} m²", help="Near-field blind zones")
         
         with st.expander("Methodology: Grid-Based Integration"):
             st.markdown("""
