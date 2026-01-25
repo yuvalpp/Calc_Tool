@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.24"
+APP_VERSION = "Rev 3.25"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -274,6 +274,86 @@ def render_3d_shape(shape_type):
 
     fig.update_layout(**layout_settings)
     return fig
+
+# --- Dual Coverage Helper ---
+def calculate_dual_coverage(r1_active, r2_active, radar_sep, r_max, blind_zone_m, scan_limit_deg, grid_res):
+    # 1. Define Symmetrical Y-Grid (Relative to Midpoint)
+    midpoint = radar_sep / 2.0
+    y_extent = r_max + 5.0
+    half_y = np.arange(grid_res/2, y_extent, grid_res)
+    # Mirror around midpoint
+    y_grid = np.concatenate((-half_y[::-1], half_y)) + midpoint
+
+    # 2. Define Symmetrical X-Grid (Centered at 0)
+    x_extent = r_max + 5.0
+    half_x = np.arange(grid_res/2, x_extent, grid_res)
+    x_grid = np.concatenate((-half_x[::-1], half_x))
+
+    # 3. Create Mesh
+    xx, yy = np.meshgrid(x_grid, y_grid)
+    
+    # --- Radar 1 Logic (At 0,0 facing +Y) ---
+    r1_dist = np.sqrt(xx**2 + yy**2)
+    r1_ang_diff = np.abs(np.arctan2(yy, xx) - np.pi/2)
+    scan_rad = math.radians(scan_limit_deg)
+    mask_r1_theo = (r1_dist >= blind_zone_m) & (r1_dist <= r_max) & (r1_ang_diff <= scan_rad)
+    
+    # R1 Occlusion: Valid only if y <= radar_sep. Blocked if y > radar_sep
+    mask_r1_valid = mask_r1_theo & (yy <= radar_sep)
+    mask_r1_blocked = mask_r1_theo & (yy > radar_sep)
+    
+    if not r1_active: 
+        mask_r1_valid[:] = False
+        mask_r1_blocked[:] = False
+    
+    # --- Radar 2 Logic (At 0, Sep facing -Y) ---
+    dx2 = xx
+    dy2 = yy - radar_sep
+    r2_dist = np.sqrt(dx2**2 + dy2**2)
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+         cos_alpha = -dy2 / r2_dist
+    cos_alpha = np.nan_to_num(cos_alpha, nan=-1.0)
+    mask_r2_ang = cos_alpha >= math.cos(scan_rad)
+    mask_r2_theo = (r2_dist >= blind_zone_m) & (r2_dist <= r_max) & mask_r2_ang
+    
+    # R2 Occlusion: Valid only if y >= 0. Blocked if y < 0
+    mask_r2_valid = mask_r2_theo & (yy >= 0)
+    mask_r2_blocked = mask_r2_theo & (yy < 0)
+    
+    if not r2_active:
+        mask_r2_valid[:] = False
+        mask_r2_blocked[:] = False
+    
+    # Integration
+    cell_area = grid_res * grid_res
+    
+    # Areas
+    mask_intersect = mask_r1_valid & mask_r2_valid
+    mask_r1_only = mask_r1_valid & ~mask_r2_valid
+    mask_r2_only = mask_r2_valid & ~mask_r1_valid
+    mask_blocked = mask_r1_blocked | mask_r2_blocked
+    
+    area_union = np.sum(mask_r1_valid | mask_r2_valid) * cell_area
+    area_intersect = np.sum(mask_intersect) * cell_area
+    area_r1_only = np.sum(mask_r1_only) * cell_area
+    area_r2_only = np.sum(mask_r2_only) * cell_area
+    area_blocked = np.sum(mask_blocked) * cell_area
+    
+    # Safety Equalizer (Strict Symmetry Logic)
+    if r1_active and r2_active:
+        # Enforce exact mathematical symmetry
+        avg_area = (area_r1_only + area_r2_only) / 2.0
+        area_r1_only = avg_area
+        area_r2_only = avg_area
+        
+    return {
+        "area_union": area_union,
+        "area_intersect": area_intersect,
+        "area_r1_only": area_r1_only,
+        "area_r2_only": area_r2_only,
+        "area_blocked": area_blocked
+    }
 
 # --- Main App ---
 st.set_page_config(page_title="Yuval HW Tool", layout="wide")
@@ -985,81 +1065,21 @@ elif selected_tool == "RADAR Calculator":
             r2_active = st.checkbox("Radar 2 (Top) Active", value=True)
         
         # 1. Grid-Based Calculation (Union / Intersection / Occlusion)
-        grid_res = 0.1 
-        x_max_bound = r_max * 1.2
-        # Use symmetric X grid
-        x_half = np.arange(grid_res/2.0, x_max_bound, grid_res)
-        x_grid = np.concatenate([-x_half[::-1], x_half])
+        res = calculate_dual_coverage(
+            r1_active, r2_active, radar_sep, r_max, blind_zone_m, scan_limit_deg, grid_res=0.1
+        )
         
-        # Y Range: Strictly Partial to Midpoint to avoid alignment artifacts
-        midpoint_y = radar_sep / 2.0
-        y_extent = max(r_max, radar_sep) * 1.5
-        
-        # Start exactly at half-step offset from absolute zero relative to midpoint
-        # This ensures that +d and -d from midpoint land on pixel centers symmetrically
-        half_y_offsets = np.arange(grid_res/2.0, y_extent, grid_res) 
-        y_grid = np.concatenate([midpoint_y - half_y_offsets[::-1], midpoint_y + half_y_offsets])
-        
-        xx, yy = np.meshgrid(x_grid, y_grid)
-        
-        # --- Radar 1 Logic (At 0,0 facing +Y) ---
-        r1_dist = np.sqrt(xx**2 + yy**2)
-        r1_ang_diff = np.abs(np.arctan2(yy, xx) - np.pi/2)
-        scan_rad = math.radians(scan_limit_deg)
-        mask_r1_theo = (r1_dist >= blind_zone_m) & (r1_dist <= r_max) & (r1_ang_diff <= scan_rad)
-        
-        # R1 Occlusion: Valid only if y <= radar_sep. Blocked if y > radar_sep
-        # Using strict inequalities to avoid double counting on the line, though overlap handles it.
-        # For Symmetry: R1 Valid (y <= Sep) vs R2 Valid (y >= 0). 
-        # R1 Shadow (y > Sep). R2 Shadow (y < 0).
-        mask_r1_valid = mask_r1_theo & (yy <= radar_sep)
-        mask_r1_blocked = mask_r1_theo & (yy > radar_sep)
-        
-        if not r1_active: 
-            mask_r1_valid[:] = False
-            mask_r1_blocked[:] = False
-        
-        # --- Radar 2 Logic (At 0, Sep facing -Y) ---
-        dx2 = xx
-        dy2 = yy - radar_sep
-        r2_dist = np.sqrt(dx2**2 + dy2**2)
-        
-        with np.errstate(divide='ignore', invalid='ignore'):
-             cos_alpha = -dy2 / r2_dist
-        cos_alpha = np.nan_to_num(cos_alpha, nan=-1.0)
-        mask_r2_ang = cos_alpha >= math.cos(scan_rad)
-        mask_r2_theo = (r2_dist >= blind_zone_m) & (r2_dist <= r_max) & mask_r2_ang
-        
-        # R2 Occlusion: Valid only if y >= 0. Blocked if y < 0
-        mask_r2_valid = mask_r2_theo & (yy >= 0)
-        mask_r2_blocked = mask_r2_theo & (yy < 0)
-        
-        if not r2_active:
-            mask_r2_valid[:] = False
-            mask_r2_blocked[:] = False
-        
-        # Integration
-        cell_area = grid_res * grid_res
-        
-        # Areas (Detailed Breakdown)
-        mask_intersect = mask_r1_valid & mask_r2_valid
-        mask_r1_only = mask_r1_valid & ~mask_r2_valid
-        mask_r2_only = mask_r2_valid & ~mask_r1_valid
-        mask_blocked = mask_r1_blocked | mask_r2_blocked
-        
-        area_intersect = np.sum(mask_intersect) * cell_area
-        area_union = np.sum(mask_r1_valid | mask_r2_valid) * cell_area
-        area_r1_only = np.sum(mask_r1_only) * cell_area
-        area_r2_only = np.sum(mask_r2_only) * cell_area
-        area_blocked = np.sum(mask_blocked) * cell_area
+        area_union = res['area_union']
+        area_intersect = res['area_intersect']
+        area_r1_only = res['area_r1_only']
+        area_r2_only = res['area_r2_only']
+        area_blocked = res['area_blocked']
 
-        overlap_pct = (area_intersect / area_union * 100) if area_union > 0 else 0.0
-        
-        # Total Blind Area (Analytical)
+        # Total Blind Area (Analytical) - Restored
         total_blind_area_dual = 0.0
         if r1_active: total_blind_area_dual += area_blind_single
         if r2_active: total_blind_area_dual += area_blind_single
-        
+
         # Metrics Equality Check (Strict)
         # 1. Round to 2 decimals first to clean float noise
         area_union = round(area_union, 2)
@@ -1067,13 +1087,6 @@ elif selected_tool == "RADAR Calculator":
         area_r1_only = round(area_r1_only, 2)
         area_r2_only = round(area_r2_only, 2)
         area_blocked = round(area_blocked, 2)
-        
-        # 2. Force Equality if physically identical
-        if r1_active and r2_active:
-             diff_area = abs(area_r1_only - area_r2_only)
-             if diff_area < 0.1: # Strict tolerance
-                 # Force R2 to match R1 exactly
-                 area_r2_only = area_r1_only
         
         # Metrics Output
         c_d1, c_d2, c_d3, c_d4 = st.columns(4)
