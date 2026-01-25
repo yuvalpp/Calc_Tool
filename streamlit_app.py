@@ -1032,13 +1032,21 @@ elif selected_tool == "RADAR Calculator":
         # Integration
         cell_area = grid_res * grid_res
         
-        # Areas (Using Valid Masks)
-        area_intersect = np.sum(mask_r1_valid & mask_r2_valid) * cell_area
-        area_union = np.sum(mask_r1_valid | mask_r2_valid) * cell_area
-        overlap_pct = (area_intersect / area_union * 100) if area_union > 0 else 0.0
+        # Areas (Detailed Breakdown)
+        # Masks for specific regions
+        mask_intersect = mask_r1_valid & mask_r2_valid
+        mask_r1_only = mask_r1_valid & ~mask_r2_valid
+        mask_r2_only = mask_r2_valid & ~mask_r1_valid
+        mask_blocked = mask_r1_blocked | mask_r2_blocked
         
-        # Blocked Area (Shadowed)
-        area_blocked = np.sum(mask_r1_blocked | mask_r2_blocked) * cell_area
+        # Calculate Areas
+        area_intersect = np.sum(mask_intersect) * cell_area
+        area_union = np.sum(mask_r1_valid | mask_r2_valid) * cell_area
+        area_r1_only = np.sum(mask_r1_only) * cell_area
+        area_r2_only = np.sum(mask_r2_only) * cell_area
+        area_blocked = np.sum(mask_blocked) * cell_area
+
+        overlap_pct = (area_intersect / area_union * 100) if area_union > 0 else 0.0
         
         # Total Blind Area (Near Field Hole) - purely analytical estimation for display
         total_blind_area_dual = 0.0
@@ -1069,18 +1077,9 @@ elif selected_tool == "RADAR Calculator":
         fig_pass = go.Figure()
         
         # Helper: Generate Wedge Polygon with radial clipping for blockage
-        # clip_y_min/max: define the valid Y-band. 
-        # For R1: Clip Y Max = Sep. For R2: Clip Y Min = 0.
-        
         def get_clipped_wedge_coords(cx, cy, r_in, r_out, center_deg, half_fov_deg, y_limit, is_r1):
             angles = np.linspace(center_deg - half_fov_deg, center_deg + half_fov_deg, 100)
             rads = np.radians(angles)
-            
-            # For each angle, determining the effective radius based on Y-limit
-            # R1 (up): y = cy + r*sin(th). y_limit = Sep. Max valid r: r*sin(th) <= Sep-cy => r <= (Sep-cy)/sin(th)
-            # R2 (down): y = cy + r*sin(th). y_limit = 0. Max valid r: y >= 0. cy+r*sin(th) >= 0 => r*sin(th) >= -cy. 
-            # Note sinus is negative for R2 angles (approx 270). 
-            
             valid_r_out = np.full_like(rads, r_out)
             
             for i, th in enumerate(rads):
@@ -1088,20 +1087,14 @@ elif selected_tool == "RADAR Calculator":
                 if abs(sin_th) < 1e-6: continue 
                 
                 if is_r1:
-                    # Limit if y > y_limit
-                    # y = 0 + r*sin. limit y_limit. r_lim = y_limit / sin_th
                     if sin_th > 0:
                         r_lim = (y_limit - cy) / sin_th
                         if r_lim < r_out: valid_r_out[i] = r_lim
                 else:
-                    # R2: y = Sep + r*sin. limit 0. r*sin >= -Sep. r <= -Sep/sin (since sin < 0, div by neg flips inequality? No.)
-                    # Let's say Sep=10. y < 0 is blocked. Valid is y >= 0.
-                    # 10 + r*sin >= 0 => r*sin >= -10 => r <= -10/sin (sin is neg e.g. -1). r <= 10. Correct.
                     if sin_th < 0:
                         r_lim = (0 - cy) / sin_th
                         if r_lim < r_out: valid_r_out[i] = r_lim
 
-            # Valid Polygon (Usable)
             x_out = cx + valid_r_out * np.cos(rads)
             y_out = cy + valid_r_out * np.sin(rads)
             
@@ -1110,55 +1103,71 @@ elif selected_tool == "RADAR Calculator":
             
             x_poly = np.concatenate([x_out, x_in, [x_out[0]]])
             y_poly = np.concatenate([y_out, y_in, [y_out[0]]])
-            
             return x_poly, y_poly
 
-        # Draw Blocked/Shadowed Layer First (Bottom)
-        # We simulate this by drawing the FULL wedge in Black, then drawing Valid on top?
-        # Or explicitly calculate blocked poly? 
-        # Easier: Draw Full in Black (Blocked Color), then Draw Valid in Color on top.
-        # But we need "Black" only where it *would* exist. 
-        # So: Draw r_in to r_max in Black. 
+        # Draw Layers
         
+        # Layer 1: Shadows (Background)
+        # R1 Shadow (Top)
         if r1_active:
-            # 1. Full Potential Wedge (Shadow)
-            sx1, sy1 = get_clipped_wedge_coords(0, 0, blind_zone_m, r_max, 90, scan_limit_deg, 9999, True) # No limit
-            fig_pass.add_trace(go.Scatter(x=sx1, y=sy1, fill='toself', mode='none', name='R1 Shadow', fillcolor='rgba(0,0,0,0.2)', hoverinfo='skip', showlegend=False))
-            
-            # 2. Valid Wedge (Blue)
+             # Full wedge for shadow visual
+             sx1, sy1 = get_clipped_wedge_coords(0, 0, blind_zone_m, r_max, 90, scan_limit_deg, 9999, True)
+             fig_pass.add_trace(go.Scatter(x=sx1, y=sy1, fill='toself', mode='none', 
+                name=f"Shadow/Blocked ({area_blocked:.1f} m²)", 
+                fillcolor='rgba(128, 128, 128, 0.4)', showlegend=True, hoverinfo='skip'))
+
+        # R2 Shadow (Bottom)
+        if r2_active:
+             sx2, sy2 = get_clipped_wedge_coords(0, radar_sep, blind_zone_m, r_max, 270, scan_limit_deg, -9999, False)
+             # Only show legend once if both act as shadow, or distinct? User asked generic legend. 
+             # We reuse the name if R1 already added it.
+             show_leg = True if not r1_active else False
+             fig_pass.add_trace(go.Scatter(x=sx2, y=sy2, fill='toself', mode='none', 
+                name=f"Shadow/Blocked ({area_blocked:.1f} m²)", 
+                fillcolor='rgba(128, 128, 128, 0.4)', showlegend=show_leg, hoverinfo='skip'))
+
+        # Layer 2: Usable Coverage
+        if r1_active:
             vx1, vy1 = get_clipped_wedge_coords(0, 0, blind_zone_m, r_max, 90, scan_limit_deg, radar_sep, True)
-            fig_pass.add_trace(go.Scatter(x=vx1, y=vy1, fill='toself', mode='lines', name='R1 Usable', line=dict(color='blue', width=1), fillcolor='rgba(0, 0, 255, 0.3)', hoverinfo='skip'))
-            
-            # Label
-            fig_pass.add_trace(go.Scatter(x=[0], y=[-2], mode='text', text=['RADAR 1'], textfont=dict(size=14, color='black')))
+            fig_pass.add_trace(go.Scatter(x=vx1, y=vy1, fill='toself', mode='lines', 
+                name=f"Radar 1 Only ({area_r1_only:.1f} m²)", 
+                line=dict(color='blue', width=1), fillcolor='rgba(0, 0, 255, 0.3)', hoverinfo='skip'))
+            fig_pass.add_trace(go.Scatter(x=[0], y=[-2], mode='text', text=['RADAR 1'], textfont=dict(size=14, color='black'), showlegend=False))
 
         if r2_active:
-            # 1. Full Potential Wedge (Shadow)
-            sx2, sy2 = get_clipped_wedge_coords(0, radar_sep, blind_zone_m, r_max, 270, scan_limit_deg, -9999, False)
-            fig_pass.add_trace(go.Scatter(x=sx2, y=sy2, fill='toself', mode='none', name='R2 Shadow', fillcolor='rgba(0,0,0,0.2)', hoverinfo='skip', showlegend=False))
-            
-            # 2. Valid Wedge (Red)
             vx2, vy2 = get_clipped_wedge_coords(0, radar_sep, blind_zone_m, r_max, 270, scan_limit_deg, 0, False)
-            fig_pass.add_trace(go.Scatter(x=vx2, y=vy2, fill='toself', mode='lines', name='R2 Usable', line=dict(color='red', width=1), fillcolor='rgba(255, 0, 0, 0.3)', hoverinfo='skip'))
-            
-            # Label
-            fig_pass.add_trace(go.Scatter(x=[0], y=[radar_sep + 2], mode='text', text=['RADAR 2'], textfont=dict(size=14, color='black')))
+            fig_pass.add_trace(go.Scatter(x=vx2, y=vy2, fill='toself', mode='lines', 
+                name=f"Radar 2 Only ({area_r2_only:.1f} m²)", 
+                line=dict(color='red', width=1), fillcolor='rgba(255, 0, 0, 0.3)', hoverinfo='skip'))
+            fig_pass.add_trace(go.Scatter(x=[0], y=[radar_sep + 2], mode='text', text=['RADAR 2'], textfont=dict(size=14, color='black'), showlegend=False))
 
-        # Draw Blind Zones (Top Layer)
+        # Layer 3: Intersection Marker (Dummy for Legend)
+        if r1_active and r2_active:
+             fig_pass.add_trace(go.Scatter(x=[None], y=[None], mode='markers', 
+                marker=dict(size=10, color='purple', opacity=0.5),
+                name=f"Dual Coverage ({area_intersect:.1f} m²)"))
+
+        # Layer 4: Blind Zones
         if r1_active and blind_zone_m > 0:
              bx1, by1 = get_clipped_wedge_coords(0, 0, 0, blind_zone_m, 90, scan_limit_deg, 9999, True)
-             fig_pass.add_trace(go.Scatter(x=bx1, y=by1, fill='toself', mode='lines', name='R1 Blind', line=dict(color='rgb(50,50,50)', width=1), fillcolor='rgba(50,50,50,0.8)', hoverinfo='skip'))
+             fig_pass.add_trace(go.Scatter(x=bx1, y=by1, fill='toself', mode='lines', 
+                name=f"Blind Zone ({total_blind_area_dual:.1f} m²)", 
+                line=dict(color='rgb(50,50,50)', width=1), fillcolor='rgba(50,50,50,0.8)', hoverinfo='skip'))
 
         if r2_active and blind_zone_m > 0:
              bx2, by2 = get_clipped_wedge_coords(0, radar_sep, 0, blind_zone_m, 270, scan_limit_deg, -9999, False)
-             fig_pass.add_trace(go.Scatter(x=bx2, y=by2, fill='toself', mode='lines', name='R2 Blind', line=dict(color='rgb(50,50,50)', width=1), fillcolor='rgba(50,50,50,0.8)', hoverinfo='skip'))
+             show_leg_blind = True if (not r1_active) else False
+             fig_pass.add_trace(go.Scatter(x=bx2, y=by2, fill='toself', mode='lines', 
+                name=f"Blind Zone ({total_blind_area_dual:.1f} m²)", 
+                line=dict(color='rgb(50,50,50)', width=1), fillcolor='rgba(50,50,50,0.8)', showlegend=show_leg_blind, hoverinfo='skip'))
 
         fig_pass.update_layout(
             title="Passage Map (Top Down View)",
             xaxis_title="Cross-Range (m)", yaxis_title="Down-Range (m)",
             xaxis=dict(scaleanchor="y", scaleratio=1), 
             margin=dict(l=20, r=20, t=30, b=20), height=500, showlegend=True,
-            dragmode='pan'
+            dragmode='pan',
+            legend=dict(x=1.02, y=1, xanchor='left', yanchor='top', bgcolor='rgba(255,255,255,0.5)')
         )
         st.plotly_chart(fig_pass, use_container_width=True)
 
