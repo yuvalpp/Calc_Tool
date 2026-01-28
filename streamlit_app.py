@@ -146,7 +146,7 @@ def draw_feedback_schematic(r1, r2, vout, vfb):
         return d
 
 # --- Constants ---
-APP_VERSION = "Rev 3.25"
+APP_VERSION = "Rev 3.29"
 
 # --- Near Field Helper Function ---
 def calculate_near_field(d_aperture, wavelength):
@@ -356,8 +356,8 @@ def calculate_dual_coverage(r1_active, r2_active, radar_sep, r_max, blind_zone_m
     }
 
 # --- Main App ---
-st.set_page_config(page_title="Yuval HW Tool", layout="wide")
-st.title("Yuval HW Tool")
+st.set_page_config(page_title="Scanary HW tool", layout="wide")
+st.title("Scanary HW tool")
 
 # --- Custom CSS for Styling ---
 st.markdown(
@@ -1063,6 +1063,50 @@ elif selected_tool == "RADAR Calculator":
             r1_active = st.checkbox("Radar 1 (Bottom) Active", value=True)
         with c_dr_ctrl3:
             r2_active = st.checkbox("Radar 2 (Top) Active", value=True)
+
+        # --- Digital Tape Measure (New Feature Rev 3.26) ---
+        # --- Digital Tape Measure (New Feature Rev 3.29: Overhaul) ---
+        show_ruler = False
+        tm_x1, tm_y1, tm_x2, tm_y2 = 0.0, 0.0, 0.0, 0.0
+        
+        with st.expander("📏 Digital Tape Measure (Distance Calculator)", expanded=False):
+             # A. Master Toggle
+             show_ruler = st.checkbox("Show Measurement Ruler on Graph", value=True)
+             
+             if show_ruler:
+                 # B. Input Mode Selector
+                 input_mode = st.radio("Input Method:", ["Sliders (Drag)", "Manual Entry (Type)"], horizontal=True)
+                 
+                 # Dynamic Limits based on Max Range
+                 tm_limit_x = float(r_max)
+                 tm_limit_y = float(r_max) + 5.0 # Extra headroom
+                 
+                 c_tm_probe_a, c_tm_probe_b = st.columns(2)
+                 
+                 # C. Coordinate Inputs (Hybrid)
+                 if input_mode == "Sliders (Drag)":
+                     with c_tm_probe_a:
+                         st.markdown("**📍 Probe A (Start)**")
+                         tm_x1 = st.slider("X Position", -tm_limit_x, tm_limit_x, 0.0, step=0.1, key="tm_s_x1")
+                         tm_y1 = st.slider("Y Position", -5.0, tm_limit_y, 0.0, step=0.1, key="tm_s_y1")
+                     with c_tm_probe_b:
+                         st.markdown("**📍 Probe B (End)**")
+                         tm_x2 = st.slider("X Position", -tm_limit_x, tm_limit_x, 0.0, step=0.1, key="tm_s_x2")
+                         default_y2 = min(radar_sep, tm_limit_y)
+                         tm_y2 = st.slider("Y Position", -5.0, tm_limit_y, default_y2, step=0.1, key="tm_s_y2")
+                 else: # Manual Entry
+                     with c_tm_probe_a:
+                         st.markdown("**📍 Probe A (Start)**")
+                         tm_x1 = st.number_input("X Position", value=0.0, step=0.01, format="%.2f", key="tm_m_x1")
+                         tm_y1 = st.number_input("Y Position", value=0.0, step=0.01, format="%.2f", key="tm_m_y1")
+                     with c_tm_probe_b:
+                         st.markdown("**📍 Probe B (End)**")
+                         tm_x2 = st.number_input("X Position", value=0.0, step=0.01, format="%.2f", key="tm_m_x2")
+                         tm_y2 = st.number_input("Y Position", value=radar_sep, step=0.01, format="%.2f", key="tm_m_y2")
+
+                 # Calculation & Metric (Always Visible if Ruler On)
+                 tm_dist = math.sqrt((tm_x2 - tm_x1)**2 + (tm_y2 - tm_y1)**2)
+                 st.metric("Measured Distance", f"{tm_dist:.2f} m")
         
         # 1. Grid-Based Calculation (Union / Intersection / Occlusion)
         res = calculate_dual_coverage(
@@ -1227,6 +1271,34 @@ elif selected_tool == "RADAR Calculator":
              fig_pass.add_trace(go.Scatter(x=bx2, y=by2, fill='toself', mode='lines', 
                 name=f"Blind Zone ({total_blind_area_dual:.1f} m²)", 
                 line=dict(color='rgb(50,50,50)', width=1), fillcolor='rgba(50,50,50,0.8)', showlegend=show_leg_blind, hoverinfo='skip'))
+
+        # Layer 5: Measurement Ruler (Smart Visualization - Rev 3.29)
+        if show_ruler:
+            # A. The Line
+            fig_pass.add_trace(go.Scatter(
+                x=[tm_x1, tm_x2], y=[tm_y1, tm_y2],
+                mode='lines+markers',
+                name="Measurement",
+                line=dict(color='#FFFF00', width=3, dash='dash'), # Bright Yellow / Gold
+                marker=dict(size=8, color='#FFFF00', symbol='x'),
+                hovertemplate='(%{x:.2f}, %{y:.2f})<extra></extra>',
+                showlegend=False
+            ))
+            
+            # B. The Floating Label
+            mid_x = (tm_x1 + tm_x2) / 2.0
+            mid_y = (tm_y1 + tm_y2) / 2.0
+            dist_val = math.sqrt((tm_x2 - tm_x1)**2 + (tm_y2 - tm_y1)**2)
+            
+            fig_pass.add_annotation(
+                x=mid_x, y=mid_y,
+                text=f"L = {dist_val:.2f} m",
+                showarrow=False,
+                yshift=10, # Float slightly above
+                bgcolor="#FFFF00",
+                bordercolor="black",
+                font=dict(color="black", size=14)
+            )
 
         fig_pass.update_layout(
             title="Passage Map (Top Down View)",
