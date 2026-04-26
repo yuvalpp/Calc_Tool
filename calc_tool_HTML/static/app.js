@@ -1,1 +1,0 @@
-console.log("calc_tool_HTML loaded");
